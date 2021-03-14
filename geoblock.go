@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 const (
 	xForwardedFor = "X-Forwarded-For"
+	xRealIp       = "X-Real-IP"
 )
 
 // Config the plugin configuration.
@@ -57,17 +59,26 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 }
 
 func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	reqIPAddr := a.CollectRemoteIP(req)
+	reqIPAddr, err := a.CollectRemoteIP(req)
+	if err != nil {
+		// if one of the ip addresses could not be parsed, return status forbidden
+		log.Println(err)
+
+		rw.WriteHeader(http.StatusForbidden)
+
+		return
+	}
 
 	for _, ipAddress := range reqIPAddr {
 		var entry IpEntry
+		ipAddressString := ipAddress.String()
 
-		entry, ok := a.database[ipAddress]
+		entry, ok := a.database[ipAddressString]
 
 		if !ok {
-			country := a.CallGeoJS(ipAddress)
+			country := a.CallGeoJS(ipAddressString)
 			entry = IpEntry{Country: country, Timestamp: time.Now()}
-			a.database[ipAddress] = entry
+			a.database[ipAddressString] = entry
 			log.Println("Added to database: ", entry)
 		} else {
 			log.Println("Loaded from database: ", entry)
@@ -85,30 +96,52 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 			return
 		} else {
-			log.Printf("%s: request denied [%s]", a.name, ipAddress)
+			log.Printf("%s: request allowed [%s]", a.name, ipAddress)
 		}
 	}
 
 	a.next.ServeHTTP(rw, req)
 }
 
-func (a *GeoBlock) CollectRemoteIP(req *http.Request) []string {
-	var ipList []string
+func (a *GeoBlock) CollectRemoteIP(req *http.Request) ([]*net.IP, error) {
+	var ipList []*net.IP
 
-	xForwardedForValue := req.Header.Get(xForwardedFor)
-	xForwardedForIPs := strings.Split(xForwardedForValue, ",")
-
-	for key, value := range xForwardedForIPs {
-		log.Println(key, value)
-		ipList = append(ipList, value)
+	splitFn := func(c rune) bool {
+		return c == ','
 	}
 
-	return ipList
+	xForwardedForValue := req.Header.Get(xForwardedFor)
+	xForwardedForIPs := strings.FieldsFunc(xForwardedForValue, splitFn)
+
+	xRealIpValue := req.Header.Get(xRealIp)
+	xRealIpIPs := strings.FieldsFunc(xRealIpValue, splitFn)
+
+	for key, value := range xForwardedForIPs {
+		ipAddress, err := parseIP(value)
+		if err != nil {
+			return ipList, fmt.Errorf("parsing failed: %s", err)
+		}
+
+		log.Printf("appending ip address (%d): %s", key, ipAddress)
+		ipList = append(ipList, &ipAddress)
+	}
+
+	for key, value := range xRealIpIPs {
+		ipAddress, err := parseIP(value)
+		if err != nil {
+			return ipList, fmt.Errorf("parsing failed: %s", err)
+		}
+
+		log.Printf("appending ip address (%d): %s", key, ipAddress)
+		ipList = append(ipList, &ipAddress)
+	}
+
+	return ipList, nil
 }
 
 func (a *GeoBlock) CallGeoJS(ipAddress string) string {
 	geoJsClient := http.Client{
-		Timeout: time.Second * 1, // Timeout after 1 seconds
+		Timeout: time.Millisecond * 750, // Timeout after 150 milliseconds
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "https://get.geojs.io/v1/ip/country/"+ipAddress, nil)
@@ -145,4 +178,14 @@ func stringInSlice(a string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func parseIP(addr string) (net.IP, error) {
+	ipAddress := net.ParseIP(addr)
+
+	if ipAddress == nil {
+		return nil, fmt.Errorf("unable parse IP address from address [%s]", addr)
+	}
+
+	return ipAddress, nil
 }
