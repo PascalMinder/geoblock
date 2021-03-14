@@ -1,4 +1,4 @@
-package geoblock_test
+package GeoBlock_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	geoblock "github.com/PascalMinder/GeoBlock"
+	GeoBlock "github.com/PascalMinder/GeoBlock"
 )
 
 const (
@@ -16,14 +16,14 @@ const (
 )
 
 func TestAllowedContry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
+	cfg := GeoBlock.CreateConfig()
 
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,14 +43,14 @@ func TestAllowedContry(t *testing.T) {
 }
 
 func TestDeniedContry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
+	cfg := GeoBlock.CreateConfig()
 
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}

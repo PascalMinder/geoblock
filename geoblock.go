@@ -1,5 +1,5 @@
 // Package geoblock a Traefik plugin to block requests based on their country of origin.
-package geoblock
+package GeoBlock
 
 import (
 	"context"
