@@ -1,0 +1,10 @@
+displayName: GeoBlock
+type: middleware
+
+import: github.com/PascalMinder/GeoBlock
+
+summary: 'block request based on their country of origin'
+
+testData:
+  countries:
+    - CH

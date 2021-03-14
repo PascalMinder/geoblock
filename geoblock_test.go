@@ -1,0 +1,80 @@
+package geoblock_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	geoblock "github.com/PascalMinder/GeoBlock"
+)
+
+const (
+	xForwardedFor = "X-Forwarded-For"
+	CA            = "99.220.109.148"
+	CH            = "82.220.110.18"
+)
+
+func TestAllowedContry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
+
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, CH)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, req, http.StatusOK)
+}
+
+func TestDeniedContry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
+
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, CA)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, req, http.StatusOK)
+}
+
+func assertStatusCode(t *testing.T, req *http.Request, expected int) {
+	t.Helper()
+
+	received := req.Response.StatusCode
+
+	if received != expected {
+		t.Errorf("invalid status code: %d <> %d", expected, received)
+	}
+}
