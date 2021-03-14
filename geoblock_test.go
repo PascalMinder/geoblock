@@ -39,7 +39,7 @@ func TestAllowedContry(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	assertStatusCode(t, req, http.StatusOK)
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
 func TestDeniedContry(t *testing.T) {
@@ -66,13 +66,13 @@ func TestDeniedContry(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	assertStatusCode(t, req, http.StatusOK)
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
-func assertStatusCode(t *testing.T, req *http.Request, expected int) {
+func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
-	received := req.Response.StatusCode
+	received := req.StatusCode
 
 	if received != expected {
 		t.Errorf("invalid status code: %d <> %d", expected, received)
