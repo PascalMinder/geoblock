@@ -6,5 +6,6 @@ import: github.com/PascalMinder/GeoBlock
 summary: 'block request based on their country of origin'
 
 testData:
+  api: "https://get.geojs.io/v1/ip/country/{ip}"
   countries:
     - CH
