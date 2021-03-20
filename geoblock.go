@@ -19,8 +19,9 @@ const (
 
 // Config the plugin configuration.
 type Config struct {
-	Api       string   `yaml:"api"`
-	Countries []string `yaml:"countries,omitempty"`
+	AllowLocalRequests bool     `yaml:"allowlocalrequests"`
+	Api                string   `yaml:"api"`
+	Countries          []string `yaml:"countries,omitempty"`
 }
 
 type IpEntry struct {
@@ -35,11 +36,13 @@ func CreateConfig() *Config {
 
 // GeoBlock a Traefik plugin.
 type GeoBlock struct {
-	next      http.Handler
-	apiUri    string
-	countries []string
-	database  map[string]IpEntry
-	name      string
+	next               http.Handler
+	AllowLocalRequests bool
+	apiUri             string
+	countries          []string
+	privateIPRanges    []*net.IPNet
+	database           map[string]IpEntry
+	name               string
 }
 
 // New created a new GeoBlock plugin.
@@ -52,14 +55,18 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("no allowed country code provided")
 	}
 
+	log.Println("API uri: ", config.Api)
+	log.Println("allow local IPs: ", config.AllowLocalRequests)
 	log.Println("allowed countries: ", config.Countries)
 
 	return &GeoBlock{
-		next:      next,
-		apiUri:    config.Api,
-		countries: config.Countries,
-		database:  make(map[string]IpEntry),
-		name:      name,
+		next:               next,
+		AllowLocalRequests: config.AllowLocalRequests,
+		apiUri:             config.Api,
+		countries:          config.Countries,
+		privateIPRanges:    InitPrivateIPBlocks(),
+		database:           make(map[string]IpEntry),
+		name:               name,
 	}, nil
 }
 
@@ -75,6 +82,19 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	for _, ipAddress := range reqIPAddr {
 		var entry IpEntry
 		ipAddressString := ipAddress.String()
+		isPrivateIp := IsPrivateIP(*ipAddress, a.privateIPRanges)
+
+		if isPrivateIp {
+			if a.AllowLocalRequests {
+				log.Println("Local ip allowed: ", ipAddress)
+				a.next.ServeHTTP(rw, req)
+			} else {
+				log.Println("Local ip denied: ", ipAddress)
+				rw.WriteHeader(http.StatusForbidden)
+			}
+
+			return
+		}
 
 		entry, ok := a.database[ipAddressString]
 
@@ -171,6 +191,7 @@ func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
 	sb := string(body)
 	countryCode := strings.TrimSuffix(sb, "\n")
 
+	// this could possible cause a DoS attack
 	if len([]rune(countryCode)) != 2 {
 		return "", fmt.Errorf("API response has more than 2 characters")
 	}
@@ -198,4 +219,42 @@ func ParseIP(addr string) (net.IP, error) {
 	}
 
 	return ipAddress, nil
+}
+
+// https://stackoverflow.com/questions/41240761/check-if-ip-address-is-in-private-network-space
+func InitPrivateIPBlocks() []*net.IPNet {
+	var privateIPBlocks []*net.IPNet
+
+	for _, cidr := range []string{
+		"127.0.0.0/8",    // IPv4 loopback
+		"10.0.0.0/8",     // RFC1918
+		"172.16.0.0/12",  // RFC1918
+		"192.168.0.0/16", // RFC1918
+		"169.254.0.0/16", // RFC3927 link-local
+		"::1/128",        // IPv6 loopback
+		"fe80::/10",      // IPv6 link-local
+		"fc00::/7",       // IPv6 unique local addr
+	} {
+		_, block, err := net.ParseCIDR(cidr)
+		if err != nil {
+			panic(fmt.Errorf("parse error on %q: %v", cidr, err))
+		}
+		privateIPBlocks = append(privateIPBlocks, block)
+	}
+
+	return privateIPBlocks
+}
+
+func IsPrivateIP(ip net.IP, privateIPBlocks []*net.IPNet) bool {
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	for _, block := range privateIPBlocks {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }
