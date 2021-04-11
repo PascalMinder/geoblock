@@ -20,6 +20,7 @@ const (
 // Config the plugin configuration.
 type Config struct {
 	AllowLocalRequests bool     `yaml:"allowlocalrequests"`
+	LogLocalRequests   bool     `yaml:"loglocalrequests"`
 	Api                string   `yaml:"api"`
 	Countries          []string `yaml:"countries,omitempty"`
 }
@@ -38,6 +39,7 @@ func CreateConfig() *Config {
 type GeoBlock struct {
 	next               http.Handler
 	AllowLocalRequests bool
+	LogLocalRequests   bool
 	apiUri             string
 	countries          []string
 	privateIPRanges    []*net.IPNet
@@ -57,11 +59,13 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	log.Println("API uri: ", config.Api)
 	log.Println("allow local IPs: ", config.AllowLocalRequests)
+	log.Println("log local requests: ", config.LogLocalRequests)
 	log.Println("allowed countries: ", config.Countries)
 
 	return &GeoBlock{
 		next:               next,
 		AllowLocalRequests: config.AllowLocalRequests,
+		LogLocalRequests:   config.LogLocalRequests,
 		apiUri:             config.Api,
 		countries:          config.Countries,
 		privateIPRanges:    InitPrivateIPBlocks(),
@@ -86,10 +90,14 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 		if isPrivateIp {
 			if a.AllowLocalRequests {
-				log.Println("Local ip allowed: ", ipAddress)
+				if a.LogLocalRequests {
+					log.Println("Local ip allowed: ", ipAddress)
+				}
 				a.next.ServeHTTP(rw, req)
 			} else {
-				log.Println("Local ip denied: ", ipAddress)
+				if a.LogLocalRequests {
+					log.Println("Local ip denied: ", ipAddress)
+				}
 				rw.WriteHeader(http.StatusForbidden)
 			}
 
