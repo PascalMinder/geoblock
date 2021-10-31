@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	xForwardedFor = "X-Forwarded-For"
-	xRealIp       = "X-Real-IP"
+	xForwardedFor        = "X-Forwarded-For"
+	xRealIp              = "X-Real-IP"
+	NumberOfHoursInMonth = 30 * 24
 )
 
 // Config the plugin configuration.
@@ -24,8 +25,9 @@ type Config struct {
 	AllowLocalRequests bool     `yaml:"allowlocalrequests"`
 	LogLocalRequests   bool     `yaml:"loglocalrequests"`
 	Api                string   `yaml:"api"`
-	Countries          []string `yaml:"countries,omitempty"`
 	CacheSize          int      `yaml:"cachesize"`
+	ForceMonthlyUpdate bool     `yaml:"forcemonthlyupdate"`
+	Countries          []string `yaml:"countries,omitempty"`
 }
 
 type IpEntry struct {
@@ -41,9 +43,10 @@ func CreateConfig() *Config {
 // GeoBlock a Traefik plugin.
 type GeoBlock struct {
 	next               http.Handler
-	AllowLocalRequests bool
-	LogLocalRequests   bool
+	allowLocalRequests bool
+	logLocalRequests   bool
 	apiUri             string
+	ForceMonthlyUpdate bool
 	countries          []string
 	privateIPRanges    []*net.IPNet
 	database           *lru.LRUCache
@@ -72,9 +75,10 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	return &GeoBlock{
 		next:               next,
-		AllowLocalRequests: config.AllowLocalRequests,
-		LogLocalRequests:   config.LogLocalRequests,
+		allowLocalRequests: config.AllowLocalRequests,
+		logLocalRequests:   config.LogLocalRequests,
 		apiUri:             config.Api,
+		ForceMonthlyUpdate: config.ForceMonthlyUpdate,
 		countries:          config.Countries,
 		privateIPRanges:    InitPrivateIPBlocks(),
 		database:           cache,
@@ -97,13 +101,13 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		isPrivateIp := IsPrivateIP(*ipAddress, a.privateIPRanges)
 
 		if isPrivateIp {
-			if a.AllowLocalRequests {
-				if a.LogLocalRequests {
+			if a.allowLocalRequests {
+				if a.logLocalRequests {
 					log.Println("Local ip allowed: ", ipAddress)
 				}
 				a.next.ServeHTTP(rw, req)
 			} else {
-				if a.LogLocalRequests {
+				if a.logLocalRequests {
 					log.Println("Local ip denied: ", ipAddress)
 				}
 				rw.WriteHeader(http.StatusForbidden)
@@ -115,20 +119,26 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		cacheEntry, ok := a.database.Get(ipAddressString)
 
 		if !ok {
-			country, err := a.CallGeoJS(ipAddressString)
+			entry, err = a.CreateNewIPEntry(ipAddressString)
+
 			if err != nil {
-				log.Println(err)
 				rw.WriteHeader(http.StatusForbidden)
 				return
 			}
-
-			entry = IpEntry{Country: country, Timestamp: time.Now()}
-			a.database.Add(ipAddressString, entry)
-			log.Println("Added to database: ", entry)
 		} else {
 			entry = cacheEntry.(IpEntry)
 
 			log.Println("Loaded from database: ", entry)
+
+			// check if existing entry was made more than a month ago, if so update the entry
+			if time.Since(entry.Timestamp).Hours() >= NumberOfHoursInMonth && a.ForceMonthlyUpdate {
+				entry, err = a.CreateNewIPEntry(ipAddressString)
+
+				if err != nil {
+					rw.WriteHeader(http.StatusForbidden)
+					return
+				}
+			}
 		}
 
 		var isAllowed bool = StringInSlice(entry.Country, a.countries)
@@ -178,6 +188,22 @@ func (a *GeoBlock) CollectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	}
 
 	return ipList, nil
+}
+
+func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
+	var entry IpEntry
+
+	country, err := a.CallGeoJS(ipAddressString)
+	if err != nil {
+		log.Println(err)
+		return entry, err
+	}
+
+	entry = IpEntry{Country: country, Timestamp: time.Now()}
+	a.database.Add(ipAddressString, entry)
+	log.Println("Added to database: ", entry)
+
+	return entry, nil
 }
 
 func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {

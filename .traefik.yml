@@ -10,5 +10,6 @@ testData:
   loglocalrequests: false
   api: "https://get.geojs.io/v1/ip/country/{ip}"
   cachesize: 15
+  forcemonthlyupdate: false
   countries:
     - CH

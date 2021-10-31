@@ -15,6 +15,7 @@ my-GeoBlock:
             loglocalrequests: false
             api: "https://get.geojs.io/v1/ip/country/{ip}"
             cachesize: 15
+            forcemonthlyupdate: false
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -280,6 +281,9 @@ Defines the API URL for the IP to Country resolution. The IP to fetch can be add
 
 ### Cache size `cachesize`
 Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.
+
+### Force monthly update `forcemonthlyupdate`
+Even if an IP stays in the cache for a period of a month (about 30 x 24 hours), it must be fetch again after a month.
 
 ### Countries
 A list of country codes from which connections to the service should be allowed 
