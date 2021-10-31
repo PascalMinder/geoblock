@@ -25,6 +25,7 @@ func TestEmptyApi(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = ""
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -44,6 +45,7 @@ func TestMissingIpInApi(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -63,6 +65,7 @@ func TestEmptyAllowedCountryList(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
 	cfg.Countries = make([]string, 0)
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -82,6 +85,7 @@ func TestAllowedContry(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -105,6 +109,39 @@ func TestAllowedContry(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
+func TestAllowedContryCacheLookUp(t *testing.T) {
+	cfg := GeoBlock.CreateConfig()
+
+	cfg.AllowLocalRequests = false
+	cfg.LogLocalRequests = false
+	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req.Header.Add(xForwardedFor, CH)
+
+		handler.ServeHTTP(recorder, req)
+
+		assertStatusCode(t, recorder.Result(), http.StatusOK)
+	}
+}
+
 func TestDeniedContry(t *testing.T) {
 	cfg := GeoBlock.CreateConfig()
 
@@ -112,6 +149,7 @@ func TestDeniedContry(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -142,6 +180,7 @@ func TestAllowLocalIP(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -172,6 +211,7 @@ func TestPrivateIPRange(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -202,6 +242,7 @@ func TestInvalidIp(t *testing.T) {
 	cfg.LogLocalRequests = false
 	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -236,6 +277,7 @@ func TestInvalidApiResponse(t *testing.T) {
 	fmt.Println(apiStub.URL)
 	cfg.Api = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})

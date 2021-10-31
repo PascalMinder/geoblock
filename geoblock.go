@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	lru "github.com/PascalMinder/GeoBlock/lrucache"
 )
 
 const (
@@ -23,6 +25,7 @@ type Config struct {
 	LogLocalRequests   bool     `yaml:"loglocalrequests"`
 	Api                string   `yaml:"api"`
 	Countries          []string `yaml:"countries,omitempty"`
+	CacheSize          int      `yaml:"cachesize"`
 }
 
 type IpEntry struct {
@@ -43,7 +46,7 @@ type GeoBlock struct {
 	apiUri             string
 	countries          []string
 	privateIPRanges    []*net.IPNet
-	database           map[string]IpEntry
+	database           *lru.LRUCache
 	name               string
 }
 
@@ -62,6 +65,11 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	log.Println("log local requests: ", config.LogLocalRequests)
 	log.Println("allowed countries: ", config.Countries)
 
+	cache, err := lru.NewLRUCache(config.CacheSize)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	return &GeoBlock{
 		next:               next,
 		AllowLocalRequests: config.AllowLocalRequests,
@@ -69,7 +77,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		apiUri:             config.Api,
 		countries:          config.Countries,
 		privateIPRanges:    InitPrivateIPBlocks(),
-		database:           make(map[string]IpEntry),
+		database:           cache,
 		name:               name,
 	}, nil
 }
@@ -104,7 +112,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		entry, ok := a.database[ipAddressString]
+		cacheEntry, ok := a.database.Get(ipAddressString)
 
 		if !ok {
 			country, err := a.CallGeoJS(ipAddressString)
@@ -115,9 +123,11 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 
 			entry = IpEntry{Country: country, Timestamp: time.Now()}
-			a.database[ipAddressString] = entry
+			a.database.Add(ipAddressString, entry)
 			log.Println("Added to database: ", entry)
 		} else {
+			entry = cacheEntry.(IpEntry)
+
 			log.Println("Loaded from database: ", entry)
 		}
 

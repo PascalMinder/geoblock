@@ -14,6 +14,7 @@ my-GeoBlock:
             allowlocalrequests: false
             loglocalrequests: false
             api: "https://get.geojs.io/v1/ip/country/{ip}"
+            cachesize: 15
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -265,3 +266,20 @@ my-GeoBlock:
                 - ZW # Zimbabwe
                 - AX # Åland Islands
 ````
+
+## Configuration options
+    
+### Allow local requests: `allowlocalrequests`
+If set to true, will not block request from [Private IP Ranges](https://en.wikipedia.org/wiki/Private_network).
+
+### Log local requests: `loglocalrequests`
+If set to true, will show a log message when some one accesses the service over a private ip address.
+
+### API
+Defines the API URL for the IP to Country resolution. The IP to fetch can be added with `{ip}` to the URL.
+
+### Cache size `cachesize`
+Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.
+
+### Countries
+A list of country codes from which connections to the service should be allowed 
