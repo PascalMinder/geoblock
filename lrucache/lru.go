@@ -3,10 +3,12 @@ package lrucache
 import (
 	"container/list"
 	"errors"
+	"sync"
 )
 
 // LRU struct to represent the LRU cache
 type LRUCache struct {
+	lock      sync.RWMutex
 	size      int
 	evictList *list.List
 	items     map[interface{}]*list.Element
@@ -35,6 +37,9 @@ func NewLRUCache(size int) (*LRUCache, error) {
 }
 
 func (c *LRUCache) Add(key, value interface{}) (evicted bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	// check for existing entry
 	if e, ok := c.items[key]; ok {
 		c.evictList.MoveToFront(e)
@@ -58,6 +63,9 @@ func (c *LRUCache) Add(key, value interface{}) (evicted bool) {
 }
 
 func (c *LRUCache) Get(key interface{}) (value interface{}, ok bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	e, ok := c.items[key]
 
 	if ok {
@@ -75,12 +83,19 @@ func (c *LRUCache) Get(key interface{}) (value interface{}, ok bool) {
 }
 
 func (c *LRUCache) Contains(key interface{}) (ok bool) {
+	c.lock.RLock()
+
 	_, ok = c.items[key]
+
+	c.lock.RUnlock()
 
 	return ok
 }
 
 func (c *LRUCache) Remove(key interface{}) (present bool) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	e, ok := c.items[key]
 
 	if ok {
@@ -93,6 +108,8 @@ func (c *LRUCache) Remove(key interface{}) (present bool) {
 }
 
 func (c *LRUCache) Keys() []interface{} {
+	c.lock.RLock()
+
 	keys := make([]interface{}, len(c.items))
 
 	i := 0
@@ -101,19 +118,26 @@ func (c *LRUCache) Keys() []interface{} {
 		i++
 	}
 
+	c.lock.RUnlock()
+
 	return keys
 }
 
-func (c *LRUCache) Len() int {
+func (c *LRUCache) Length() int {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
 	return c.evictList.Len()
 }
 
 func (c *LRUCache) Purge() {
+	c.lock.Lock()
+
 	for k := range c.items {
 		delete(c.items, k)
 	}
-
 	c.evictList.Init()
+
+	c.lock.Unlock()
 }
 
 func (c *LRUCache) removeOldest() {

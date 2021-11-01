@@ -19,7 +19,7 @@ type Cache interface {
 	Keys() []interface{}
 
 	// Return number of entry in the cache.
-	Len() int
+	Length() int
 
 	// Remove all entries form the cache.
 	Purge()
