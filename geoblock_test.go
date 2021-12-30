@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	xForwardedFor = "X-Forwarded-For"
-	CA            = "99.220.109.148"
-	CH            = "82.220.110.18"
-	PrivateRange  = "192.168.1.1"
-	Invalid       = "192.168.1.X"
+	xForwardedFor          = "X-Forwarded-For"
+	CA                     = "99.220.109.148"
+	CH                     = "82.220.110.18"
+	PrivateRange           = "192.168.1.1"
+	Invalid                = "192.168.1.X"
+	UnknownCountryIpGoogle = "66.249.93.100"
 )
 
 func TestEmptyApi(t *testing.T) {
@@ -107,6 +108,72 @@ func TestAllowedContry(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestAllowedUnknownContry(t *testing.T) {
+	cfg := GeoBlock.CreateConfig()
+
+	cfg.AllowLocalRequests = false
+	cfg.LogLocalRequests = false
+	cfg.AllowUnknownCountries = true
+	cfg.UnknownCountryAPIResponse = "nil"
+	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, UnknownCountryIpGoogle)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestDenyUnknownContry(t *testing.T) {
+	cfg := GeoBlock.CreateConfig()
+
+	cfg.AllowLocalRequests = false
+	cfg.LogLocalRequests = false
+	cfg.AllowUnknownCountries = false
+	cfg.UnknownCountryAPIResponse = "nil"
+	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.CacheSize = 10
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, UnknownCountryIpGoogle)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
 func TestAllowedContryCacheLookUp(t *testing.T) {

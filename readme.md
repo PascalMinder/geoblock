@@ -18,6 +18,8 @@ my-GeoBlock:
             api: "https://get.geojs.io/v1/ip/country/{ip}"
             cachesize: 15
             forcemonthlyupdate: false
+            allowunknowncountries: false
+            unknowncountrycode: "nil"
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -292,6 +294,12 @@ Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacemen
 
 ### Force monthly update `forcemonthlyupdate`
 Even if an IP stays in the cache for a period of a month (about 30 x 24 hours), it must be fetch again after a month.
+
+### Allow unknown countries `allowunknowncountries`
+Some IP addresses have no country associated with them. If this option is set to true, all IPs with no associated country are also allowed.  
+
+### Unknown country api response`unknowncountryapiresponse`
+The API uri can be customized. This options allows to customize the response string of the API when a IP with no associated country is requested.
 
 ### Countries
 A list of country codes from which connections to the service should be allowed 

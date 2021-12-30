@@ -13,5 +13,7 @@ testData:
   api: "https://get.geojs.io/v1/ip/country/{ip}"
   cachesize: 15
   forcemonthlyupdate: true
+  allowunknowncountries: false
+  unknowncountryapiresponse: "nil"
   countries:
     - CH

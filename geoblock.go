@@ -18,18 +18,21 @@ const (
 	xForwardedFor        = "X-Forwarded-For"
 	xRealIp              = "X-Real-IP"
 	NumberOfHoursInMonth = 30 * 24
+	UnknownCountryCode   = "AA"
 )
 
 // Config the plugin configuration.
 type Config struct {
-	AllowLocalRequests bool     `yaml:"allowlocalrequests"`
-	LogLocalRequests   bool     `yaml:"loglocalrequests"`
-	LogAllowedRequests bool     `yaml:"logallowedrequests"`
-	LogAPIRequests     bool     `yaml:"logapirequests"`
-	Api                string   `yaml:"api"`
-	CacheSize          int      `yaml:"cachesize"`
-	ForceMonthlyUpdate bool     `yaml:"forcemonthlyupdate"`
-	Countries          []string `yaml:"countries,omitempty"`
+	AllowLocalRequests        bool     `yaml:"allowlocalrequests"`
+	LogLocalRequests          bool     `yaml:"loglocalrequests"`
+	LogAllowedRequests        bool     `yaml:"logallowedrequests"`
+	LogAPIRequests            bool     `yaml:"logapirequests"`
+	Api                       string   `yaml:"api"`
+	CacheSize                 int      `yaml:"cachesize"`
+	ForceMonthlyUpdate        bool     `yaml:"forcemonthlyupdate"`
+	AllowUnknownCountries     bool     `yaml:"allowunknowncountries"`
+	UnknownCountryAPIResponse string   `yaml:"unknowncountryapiresponse"`
+	Countries                 []string `yaml:"countries,omitempty"`
 }
 
 type IpEntry struct {
@@ -44,17 +47,19 @@ func CreateConfig() *Config {
 
 // GeoBlock a Traefik plugin.
 type GeoBlock struct {
-	next               http.Handler
-	allowLocalRequests bool
-	logLocalRequests   bool
-	logAllowedRequests bool
-	logAPIRequests     bool
-	apiUri             string
-	ForceMonthlyUpdate bool
-	countries          []string
-	privateIPRanges    []*net.IPNet
-	database           *lru.LRUCache
-	name               string
+	next                  http.Handler
+	allowLocalRequests    bool
+	logLocalRequests      bool
+	logAllowedRequests    bool
+	logAPIRequests        bool
+	apiUri                string
+	forceMonthlyUpdate    bool
+	allowUnknownCountries bool
+	unknownCountryCode    string
+	countries             []string
+	privateIPRanges       []*net.IPNet
+	database              *lru.LRUCache
+	name                  string
 }
 
 // New created a new GeoBlock plugin.
@@ -72,6 +77,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	log.Println("log local requests: ", config.LogLocalRequests)
 	log.Println("log allowed requests: ", config.LogAllowedRequests)
 	log.Println("log api requests: ", config.LogAPIRequests)
+	log.Println("allow unknown countries: ", config.AllowUnknownCountries)
+	log.Println("unknown country api response: ", config.UnknownCountryAPIResponse)
 	log.Println("allowed countries: ", config.Countries)
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
@@ -80,17 +87,19 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	return &GeoBlock{
-		next:               next,
-		allowLocalRequests: config.AllowLocalRequests,
-		logLocalRequests:   config.LogLocalRequests,
-		logAllowedRequests: config.LogAllowedRequests,
-		logAPIRequests:     config.LogAPIRequests,
-		apiUri:             config.Api,
-		ForceMonthlyUpdate: config.ForceMonthlyUpdate,
-		countries:          config.Countries,
-		privateIPRanges:    InitPrivateIPBlocks(),
-		database:           cache,
-		name:               name,
+		next:                  next,
+		allowLocalRequests:    config.AllowLocalRequests,
+		logLocalRequests:      config.LogLocalRequests,
+		logAllowedRequests:    config.LogAllowedRequests,
+		logAPIRequests:        config.LogAPIRequests,
+		apiUri:                config.Api,
+		forceMonthlyUpdate:    config.ForceMonthlyUpdate,
+		allowUnknownCountries: config.AllowUnknownCountries,
+		unknownCountryCode:    config.UnknownCountryAPIResponse,
+		countries:             config.Countries,
+		privateIPRanges:       InitPrivateIPBlocks(),
+		database:              cache,
+		name:                  name,
 	}, nil
 }
 
@@ -139,7 +148,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			log.Println("Loaded from database: ", entry)
 
 			// check if existing entry was made more than a month ago, if so update the entry
-			if time.Since(entry.Timestamp).Hours() >= NumberOfHoursInMonth && a.ForceMonthlyUpdate {
+			if time.Since(entry.Timestamp).Hours() >= NumberOfHoursInMonth && a.forceMonthlyUpdate {
 				entry, err = a.CreateNewIPEntry(ipAddressString)
 
 				if err != nil {
@@ -149,7 +158,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 		}
 
-		var isAllowed bool = StringInSlice(entry.Country, a.countries)
+		var isAllowed bool = StringInSlice(entry.Country, a.countries) || (entry.Country == UnknownCountryCode && a.allowUnknownCountries)
 
 		if !isAllowed {
 			log.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
@@ -244,6 +253,11 @@ func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
 
 	sb := string(body)
 	countryCode := strings.TrimSuffix(sb, "\n")
+
+	// api response for unknown country
+	if len([]rune(countryCode)) == len(a.unknownCountryCode) && countryCode == a.unknownCountryCode {
+		return UnknownCountryCode, nil
+	}
 
 	// this could possible cause a DoS attack
 	if len([]rune(countryCode)) != 2 {
