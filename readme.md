@@ -13,6 +13,8 @@ my-GeoBlock:
         GeoBlock:
             allowlocalrequests: false
             loglocalrequests: false
+            logallowedrequests: false
+            logapirequests: false
             api: "https://get.geojs.io/v1/ip/country/{ip}"
             cachesize: 15
             forcemonthlyupdate: false
@@ -275,6 +277,12 @@ If set to true, will not block request from [Private IP Ranges](https://en.wikip
 
 ### Log local requests: `loglocalrequests`
 If set to true, will show a log message when some one accesses the service over a private ip address.
+
+### Log allowed requests `logallowedrequests`
+If set to true, will show a log message with the IP and the country of origin if a request is allowed.
+
+### Log API requests `logapirequests`
+If set to true, will show a log message for every API hit.
 
 ### API
 Defines the API URL for the IP to Country resolution. The IP to fetch can be added with `{ip}` to the URL.

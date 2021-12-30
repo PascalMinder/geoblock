@@ -8,8 +8,10 @@ summary: 'block request based on their country of origin'
 testData:
   allowlocalrequests: false
   loglocalrequests: false
+  logallowedrequests: false
+  logapirequests: true
   api: "https://get.geojs.io/v1/ip/country/{ip}"
   cachesize: 15
-  forcemonthlyupdate: false
+  forcemonthlyupdate: true
   countries:
     - CH

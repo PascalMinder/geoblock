@@ -24,6 +24,8 @@ const (
 type Config struct {
 	AllowLocalRequests bool     `yaml:"allowlocalrequests"`
 	LogLocalRequests   bool     `yaml:"loglocalrequests"`
+	LogAllowedRequests bool     `yaml:"logallowedrequests"`
+	LogAPIRequests     bool     `yaml:"logapirequests"`
 	Api                string   `yaml:"api"`
 	CacheSize          int      `yaml:"cachesize"`
 	ForceMonthlyUpdate bool     `yaml:"forcemonthlyupdate"`
@@ -45,6 +47,8 @@ type GeoBlock struct {
 	next               http.Handler
 	allowLocalRequests bool
 	logLocalRequests   bool
+	logAllowedRequests bool
+	logAPIRequests     bool
 	apiUri             string
 	ForceMonthlyUpdate bool
 	countries          []string
@@ -66,6 +70,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	log.Println("API uri: ", config.Api)
 	log.Println("allow local IPs: ", config.AllowLocalRequests)
 	log.Println("log local requests: ", config.LogLocalRequests)
+	log.Println("log allowed requests: ", config.LogAllowedRequests)
+	log.Println("log api requests: ", config.LogAPIRequests)
 	log.Println("allowed countries: ", config.Countries)
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
@@ -77,6 +83,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		next:               next,
 		allowLocalRequests: config.AllowLocalRequests,
 		logLocalRequests:   config.LogLocalRequests,
+		logAllowedRequests: config.LogAllowedRequests,
+		logAPIRequests:     config.LogAPIRequests,
 		apiUri:             config.Api,
 		ForceMonthlyUpdate: config.ForceMonthlyUpdate,
 		countries:          config.Countries,
@@ -149,7 +157,9 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 			return
 		} else {
-			log.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
+			if a.logAllowedRequests {
+				log.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
+			}
 		}
 	}
 
@@ -240,7 +250,9 @@ func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
 		return "", fmt.Errorf("API response has more than 2 characters")
 	}
 
-	log.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiUri)
+	if a.logAPIRequests {
+		log.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiUri)
+	}
 
 	return countryCode, nil
 }
