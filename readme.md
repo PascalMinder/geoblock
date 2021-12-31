@@ -2,8 +2,8 @@
 Simple plugin for [Traefik](https://github.com/containous/traefik) to block request based on their country of origin. Uses [GeoJs.io](https://www.geojs.io/).
 
 ## Sample configuration
-- `allowocalrequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
-- `loglocalrequests`: If set to true, will log every connection from any IP in the private IP range
+- `allowLocalRequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
+- `logLocalRequests`: If set to true, will log every connection from any IP in the private IP range
 - `api`: API URI used for querying the country associated with the connecting IP
 - `countries`: list of allowed countries
 
@@ -11,15 +11,15 @@ Simple plugin for [Traefik](https://github.com/containous/traefik) to block requ
 my-GeoBlock:
     plugin:
         GeoBlock:
-            allowlocalrequests: false
-            loglocalrequests: false
-            logallowedrequests: false
-            logapirequests: false
+            allowLocalRequests: false
+            logLocalRequests: false
+            logAllowedRequests: false
+            logApiRequests: false
             api: "https://get.geojs.io/v1/ip/country/{ip}"
-            cachesize: 15
-            forcemonthlyupdate: false
-            allowunknowncountries: false
-            unknowncountryapiresponse: "nil"
+            cacheSize: 15
+            forceMonthlyUpdate: false
+            allowUnknownCountries: false
+            unknownCountryApiResponse: "nil"
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -274,31 +274,31 @@ my-GeoBlock:
 
 ## Configuration options
     
-### Allow local requests: `allowlocalrequests`
+### Allow local requests: `allowLocalRequests`
 If set to true, will not block request from [Private IP Ranges](https://en.wikipedia.org/wiki/Private_network).
 
-### Log local requests: `loglocalrequests`
+### Log local requests: `logLocalRequests`
 If set to true, will show a log message when some one accesses the service over a private ip address.
 
-### Log allowed requests `logallowedrequests`
+### Log allowed requests `logAllowedRequests`
 If set to true, will show a log message with the IP and the country of origin if a request is allowed.
 
-### Log API requests `logapirequests`
+### Log API requests `logApiRequests`
 If set to true, will show a log message for every API hit.
 
 ### API
 Defines the API URL for the IP to Country resolution. The IP to fetch can be added with `{ip}` to the URL.
 
-### Cache size `cachesize`
+### Cache size `CacheSize`
 Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.
 
-### Force monthly update `forcemonthlyupdate`
+### Force monthly update `forceMonthlyUpdate`
 Even if an IP stays in the cache for a period of a month (about 30 x 24 hours), it must be fetch again after a month.
 
-### Allow unknown countries `allowunknowncountries`
+### Allow unknown countries `allowUnknownCountries`
 Some IP addresses have no country associated with them. If this option is set to true, all IPs with no associated country are also allowed.  
 
-### Unknown country api response`unknowncountryapiresponse`
+### Unknown country api response`unknownCountryApiResponse`
 The API uri can be customized. This options allows to customize the response string of the API when a IP with no associated country is requested.
 
 ### Countries

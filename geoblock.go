@@ -23,15 +23,15 @@ const (
 
 // Config the plugin configuration.
 type Config struct {
-	AllowLocalRequests        bool     `yaml:"allowlocalrequests"`
-	LogLocalRequests          bool     `yaml:"loglocalrequests"`
-	LogAllowedRequests        bool     `yaml:"logallowedrequests"`
-	LogAPIRequests            bool     `yaml:"logapirequests"`
+	AllowLocalRequests        bool     `yaml:"allowLocalRequests"`
+	LogLocalRequests          bool     `yaml:"logLocalRequests"`
+	LogAllowedRequests        bool     `yaml:"logAllowedRequests"`
+	LogAPIRequests            bool     `yaml:"logApiRequests"`
 	Api                       string   `yaml:"api"`
-	CacheSize                 int      `yaml:"cachesize"`
-	ForceMonthlyUpdate        bool     `yaml:"forcemonthlyupdate"`
-	AllowUnknownCountries     bool     `yaml:"allowunknowncountries"`
-	UnknownCountryAPIResponse string   `yaml:"unknowncountryapiresponse"`
+	CacheSize                 int      `yaml:"cacheSize"`
+	ForceMonthlyUpdate        bool     `yaml:"forceMonthlyUpdate"`
+	AllowUnknownCountries     bool     `yaml:"allowUnknownCountries"`
+	UnknownCountryAPIResponse string   `yaml:"unknownCountryApiResponse"`
 	Countries                 []string `yaml:"countries,omitempty"`
 }
 
@@ -72,11 +72,13 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("no allowed country code provided")
 	}
 
-	log.Println("API uri: ", config.Api)
 	log.Println("allow local IPs: ", config.AllowLocalRequests)
 	log.Println("log local requests: ", config.LogLocalRequests)
 	log.Println("log allowed requests: ", config.LogAllowedRequests)
 	log.Println("log api requests: ", config.LogAPIRequests)
+	log.Println("API uri: ", config.Api)
+	log.Println("cache size: ", config.CacheSize)
+	log.Println("force monthly update: ", config.ForceMonthlyUpdate)
 	log.Println("allow unknown countries: ", config.AllowUnknownCountries)
 	log.Println("unknown country api response: ", config.UnknownCountryAPIResponse)
 	log.Println("allowed countries: ", config.Countries)
@@ -145,7 +147,9 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		} else {
 			entry = cacheEntry.(IpEntry)
 
-			log.Println("Loaded from database: ", entry)
+			if a.logAPIRequests {
+				log.Println("Loaded from database: ", entry)
+			}
 
 			// check if existing entry was made more than a month ago, if so update the entry
 			if time.Since(entry.Timestamp).Hours() >= NumberOfHoursInMonth && a.forceMonthlyUpdate {
@@ -220,7 +224,10 @@ func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
 
 	entry = IpEntry{Country: country, Timestamp: time.Now()}
 	a.database.Add(ipAddressString, entry)
-	log.Println("Added to database: ", entry)
+
+	if a.logAPIRequests {
+		log.Println("Added to database: ", entry)
+	}
 
 	return entry, nil
 }

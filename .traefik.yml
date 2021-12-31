@@ -6,14 +6,14 @@ import: github.com/PascalMinder/GeoBlock
 summary: 'block request based on their country of origin'
 
 testData:
-  allowlocalrequests: false
-  loglocalrequests: false
-  logallowedrequests: false
-  logapirequests: true
+  allowLocalRequests: false
+  logLocalRequests: false
+  logAllowedRequests: false
+  logApiRequests: true
   api: "https://get.geojs.io/v1/ip/country/{ip}"
-  cachesize: 15
-  forcemonthlyupdate: true
-  allowunknowncountries: false
-  unknowncountryapiresponse: "nil"
+  cacheAize: 15
+  forceMonthlyUpdate: true
+  allowUnknownCountries: false
+  unknownCountryApiResponse: "nil"
   countries:
     - CH
