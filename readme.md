@@ -2,7 +2,7 @@
 Simple plugin for [Traefik](https://github.com/containous/traefik) to block request based on their country of origin. Uses [GeoJs.io](https://www.geojs.io/).
 
 ## Sample configuration
-- `allowlocalrequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
+- `allowocalrequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
 - `loglocalrequests`: If set to true, will log every connection from any IP in the private IP range
 - `api`: API URI used for querying the country associated with the connecting IP
 - `countries`: list of allowed countries
@@ -19,7 +19,7 @@ my-GeoBlock:
             cachesize: 15
             forcemonthlyupdate: false
             allowunknowncountries: false
-            unknowncountrycode: "nil"
+            unknowncountryapiresponse: "nil"
             countries:
                 - AF # Afghanistan
                 - AL # Albania
