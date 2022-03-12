@@ -11,7 +11,7 @@ testData:
   logAllowedRequests: false
   logApiRequests: true
   api: "https://get.geojs.io/v1/ip/country/{ip}"
-  cacheAize: 15
+  cacheSize: 15
   forceMonthlyUpdate: true
   allowUnknownCountries: false
   unknownCountryApiResponse: "nil"
