@@ -1,6 +1,70 @@
 # GeoBlock
 Simple plugin for [Traefik](https://github.com/containous/traefik) to block request based on their country of origin. Uses [GeoJs.io](https://www.geojs.io/).
 
+## Configuration
+Sample configuration in Traefik.
+
+### Configuration as local plugin
+
+traefik.yml
+````
+log:
+  level: INFO
+
+experimental:
+  localPlugins:
+    geoblock:
+      moduleName: github.com/PascalMinder/GeoBlock
+````
+
+dynamic-configuration.yml
+````
+http:
+  middlewares:
+    geoblock-ch:
+      plugin:
+        geoblock:
+          allowLocalRequests: true
+          logLocalRequests: false
+          logAllowedRequests: false
+          logApiRequests: true
+          api: "https://get.geojs.io/v1/ip/country/{ip}"
+          apiTimeoutMs: 750                                 # optional
+          cacheSize: 15
+          forceMonthlyUpdate: true
+          allowUnknownCountries: false
+          unknownCountryApiResponse: nil
+          countries:
+            - CH
+````
+
+docker-compose.yml
+````
+version: "3.7"
+
+services:
+  traefik:
+    image: traefik
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /docker/config/traefik/traefik.yml:/etc/traefik/traefik.yml
+      - /docker/config/traefik/dynamic-configuration.yml:/etc/traefik/dynamic-configuration.yml
+      - /plugin/GeoBlock:/plugins-local/src/github.com/PascalMinder/GeoBlock/
+
+    ports:
+      - "80:80"
+
+  hello:
+    image: containous/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hello.entrypoints=http
+      - traefik.http.routers.hello.rule=Host(`hello.localhost`)
+      - traefik.http.services.hello.loadbalancer.server.port=80
+        - traefik.http.routers.hello.middlewares=my-plugin@file
+````
+
 ## Sample configuration
 - `allowLocalRequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
 - `logLocalRequests`: If set to true, will log every connection from any IP in the private IP range
@@ -16,6 +80,7 @@ my-GeoBlock:
             logAllowedRequests: false
             logApiRequests: false
             api: "https://get.geojs.io/v1/ip/country/{ip}"
+            apiTimeoutMs: 750                                 # optional
             cacheSize: 15
             forceMonthlyUpdate: false
             allowUnknownCountries: false
@@ -286,10 +351,13 @@ If set to true, will show a log message with the IP and the country of origin if
 ### Log API requests `logApiRequests`
 If set to true, will show a log message for every API hit.
 
-### API
+### API `api`
 Defines the API URL for the IP to Country resolution. The IP to fetch can be added with `{ip}` to the URL.
 
-### Cache size `CacheSize`
+### API Timeout `apiTimeoutMs`
+Timeout for the call to the api uri.
+
+### Cache size `cacheSize`
 Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.
 
 ### Force monthly update `forceMonthlyUpdate`
@@ -301,5 +369,5 @@ Some IP addresses have no country associated with them. If this option is set to
 ### Unknown country api response`unknownCountryApiResponse`
 The API uri can be customized. This options allows to customize the response string of the API when a IP with no associated country is requested.
 
-### Countries
+### Countries `countries`
 A list of country codes from which connections to the service should be allowed 

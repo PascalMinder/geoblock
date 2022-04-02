@@ -28,6 +28,7 @@ type Config struct {
 	LogAllowedRequests        bool     `yaml:"logAllowedRequests"`
 	LogAPIRequests            bool     `yaml:"logApiRequests"`
 	Api                       string   `yaml:"api"`
+	ApiTimeoutMs              int      `yaml:"apiTimeoutMs"`
 	CacheSize                 int      `yaml:"cacheSize"`
 	ForceMonthlyUpdate        bool     `yaml:"forceMonthlyUpdate"`
 	AllowUnknownCountries     bool     `yaml:"allowUnknownCountries"`
@@ -53,6 +54,7 @@ type GeoBlock struct {
 	logAllowedRequests    bool
 	logAPIRequests        bool
 	apiUri                string
+	apiTimeoutMs          int
 	forceMonthlyUpdate    bool
 	allowUnknownCountries bool
 	unknownCountryCode    string
@@ -72,11 +74,16 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("no allowed country code provided")
 	}
 
+	if config.ApiTimeoutMs == 0 {
+		config.ApiTimeoutMs = 750
+	}
+
 	log.Println("allow local IPs: ", config.AllowLocalRequests)
 	log.Println("log local requests: ", config.LogLocalRequests)
 	log.Println("log allowed requests: ", config.LogAllowedRequests)
 	log.Println("log api requests: ", config.LogAPIRequests)
 	log.Println("API uri: ", config.Api)
+	log.Println("API timeout: ", config.ApiTimeoutMs)
 	log.Println("cache size: ", config.CacheSize)
 	log.Println("force monthly update: ", config.ForceMonthlyUpdate)
 	log.Println("allow unknown countries: ", config.AllowUnknownCountries)
@@ -95,6 +102,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		logAllowedRequests:    config.LogAllowedRequests,
 		logAPIRequests:        config.LogAPIRequests,
 		apiUri:                config.Api,
+		apiTimeoutMs:          config.ApiTimeoutMs,
 		forceMonthlyUpdate:    config.ForceMonthlyUpdate,
 		allowUnknownCountries: config.AllowUnknownCountries,
 		unknownCountryCode:    config.UnknownCountryAPIResponse,
@@ -234,7 +242,7 @@ func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
 
 func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
 	geoJsClient := http.Client{
-		Timeout: time.Millisecond * 750, // Timeout after 150 milliseconds
+		Timeout: time.Millisecond * time.Duration(a.apiTimeoutMs),
 	}
 
 	apiUri := strings.Replace(a.apiUri, "{ip}", ipAddress, 1)

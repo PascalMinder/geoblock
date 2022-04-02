@@ -110,6 +110,37 @@ func TestAllowedContry(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
+func TestMultipleAllowedContry(t *testing.T) {
+	cfg := GeoBlock.CreateConfig()
+
+	cfg.AllowLocalRequests = false
+	cfg.LogLocalRequests = false
+	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH", "CA")
+	cfg.CacheSize = 10
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, CH)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
 func TestAllowedUnknownContry(t *testing.T) {
 	cfg := GeoBlock.CreateConfig()
 
