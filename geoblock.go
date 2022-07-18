@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,10 @@ const (
 	xRealIp              = "X-Real-IP"
 	NumberOfHoursInMonth = 30 * 24
 	UnknownCountryCode   = "AA"
+)
+
+var (
+	infoLogger = log.New(ioutil.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
 )
 
 // Config the plugin configuration.
@@ -78,21 +83,23 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		config.ApiTimeoutMs = 750
 	}
 
-	log.Println("allow local IPs: ", config.AllowLocalRequests)
-	log.Println("log local requests: ", config.LogLocalRequests)
-	log.Println("log allowed requests: ", config.LogAllowedRequests)
-	log.Println("log api requests: ", config.LogAPIRequests)
-	log.Println("API uri: ", config.Api)
-	log.Println("API timeout: ", config.ApiTimeoutMs)
-	log.Println("cache size: ", config.CacheSize)
-	log.Println("force monthly update: ", config.ForceMonthlyUpdate)
-	log.Println("allow unknown countries: ", config.AllowUnknownCountries)
-	log.Println("unknown country api response: ", config.UnknownCountryAPIResponse)
-	log.Println("allowed countries: ", config.Countries)
+	infoLogger.SetOutput(os.Stdout)
+
+	infoLogger.Printf("allow local IPs: %t", config.AllowLocalRequests)
+	infoLogger.Printf("log local requests: %t", config.LogLocalRequests)
+	infoLogger.Printf("log allowed requests: %t", config.LogAllowedRequests)
+	infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
+	infoLogger.Printf("API uri: %s", config.Api)
+	infoLogger.Printf("API timeout: %d", config.ApiTimeoutMs)
+	infoLogger.Printf("cache size: %d", config.CacheSize)
+	infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
+	infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
+	infoLogger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
+	infoLogger.Printf("allowed countries: %v", config.Countries)
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
 	if err != nil {
-		log.Fatal(err)
+		infoLogger.Fatal(err)
 	}
 
 	return &GeoBlock{
@@ -117,7 +124,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	reqIPAddr, err := a.CollectRemoteIP(req)
 	if err != nil {
 		// if one of the ip addresses could not be parsed, return status forbidden
-		log.Println(err)
+		infoLogger.Println(err)
 		rw.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -130,12 +137,12 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		if isPrivateIp {
 			if a.allowLocalRequests {
 				if a.logLocalRequests {
-					log.Println("Local ip allowed: ", ipAddress)
+					infoLogger.Println("Local ip allowed: ", ipAddress)
 				}
 				a.next.ServeHTTP(rw, req)
 			} else {
 				if a.logLocalRequests {
-					log.Println("Local ip denied: ", ipAddress)
+					infoLogger.Println("Local ip denied: ", ipAddress)
 				}
 				rw.WriteHeader(http.StatusForbidden)
 			}
@@ -156,7 +163,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			entry = cacheEntry.(IpEntry)
 
 			if a.logAPIRequests {
-				log.Println("Loaded from database: ", entry)
+				infoLogger.Println("Loaded from database: ", entry)
 			}
 
 			// check if existing entry was made more than a month ago, if so update the entry
@@ -173,13 +180,13 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		var isAllowed bool = StringInSlice(entry.Country, a.countries) || (entry.Country == UnknownCountryCode && a.allowUnknownCountries)
 
 		if !isAllowed {
-			log.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
+			infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
 			rw.WriteHeader(http.StatusForbidden)
 
 			return
 		} else {
 			if a.logAllowedRequests {
-				log.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
+				infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
 			}
 		}
 	}
@@ -226,7 +233,7 @@ func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
 
 	country, err := a.CallGeoJS(ipAddressString)
 	if err != nil {
-		log.Println(err)
+		infoLogger.Println(err)
 		return entry, err
 	}
 
@@ -234,7 +241,7 @@ func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
 	a.database.Add(ipAddressString, entry)
 
 	if a.logAPIRequests {
-		log.Println("Added to database: ", entry)
+		infoLogger.Println("Added to database: ", entry)
 	}
 
 	return entry, nil
@@ -280,7 +287,7 @@ func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
 	}
 
 	if a.logAPIRequests {
-		log.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiUri)
+		infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiUri)
 	}
 
 	return countryCode, nil
