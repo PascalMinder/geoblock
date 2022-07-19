@@ -1,0 +1,76 @@
+# inspired by: https://github.com/golangci/golangci-lint/blob/master/.golangci.yml
+
+run:
+  go: "1.18"
+
+linters-settings:
+  # dupl:
+  #   threshold: 100
+  funlen:
+    lines: 100
+    statements: 50
+  golint:
+    min-confidence: 0
+  lll:
+    line-length: 125
+  goconst:
+    min-len: 2
+    min-occurences: 2
+  misspell:
+    locale: US
+
+linters:
+  disable-all: true
+  enable:
+    - asciicheck
+    # - bidichk
+    # - bodyclose
+    # - contextcheck
+    - deadcode
+    - depguard
+    - dogsled
+    # - dupl
+    # - durationcheck
+    - errcheck
+    # - errname
+    - exportloopref
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    # - ifshort
+    # - importas
+    - ineffassign
+    - lll
+    # - makezero
+    - misspell
+    - nakedret
+    # - nilerr
+    # - nilnil
+    # - noctx
+    - nolintlint
+    # - predeclared
+    # - revive
+    - staticcheck
+    - structcheck
+    - stylecheck
+    # - tagliatelle
+    # - thelper
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    # - wastedassign
+    - whitespace
+
+    # don't enable:
+    # - prealloc

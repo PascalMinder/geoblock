@@ -1,3 +1,3 @@
-module github.com/PascalMinder/GeoBlock
+module github.com/PascalMinder/geoblock
 
 go 1.15

@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "streetsidesoftware.code-spell-checker",
+    "stkb.rewrap",
+    // api
+    "arjun.swagger-viewer",
+    // language support
+    "golang.go",
+    // testing
+    "joaoacdias.golang-tdd",
+    "premparihar.gotestexplorer",
+    "alexkrechik.cucumberautocomplete",
+    "timonwong.shellcheck"
+  ]
+}

@@ -1,9 +1,9 @@
 displayName: GeoBlock
 type: middleware
 
-import: github.com/PascalMinder/GeoBlock
+import: github.com/PascalMinder/geoblock
 
-summary: 'block request based on their country of origin'
+summary: "block request based on their country of origin"
 
 testData:
   allowLocalRequests: false

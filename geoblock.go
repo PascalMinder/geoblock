@@ -1,5 +1,5 @@
 // Package geoblock a Traefik plugin to block requests based on their country of origin.
-package GeoBlock
+package geoblock
 
 import (
 	"context"
@@ -12,14 +12,15 @@ import (
 	"strings"
 	"time"
 
-	lru "github.com/PascalMinder/GeoBlock/lrucache"
+	lru "github.com/PascalMinder/geoblock/lrucache"
 )
 
 const (
 	xForwardedFor        = "X-Forwarded-For"
-	xRealIp              = "X-Real-IP"
-	NumberOfHoursInMonth = 30 * 24
-	UnknownCountryCode   = "AA"
+	xRealIP              = "X-Real-IP"
+	numberOfHoursInMonth = 30 * 24
+	unknownCountryCode   = "AA"
+	countryCodeLength    = 2
 )
 
 var (
@@ -32,8 +33,8 @@ type Config struct {
 	LogLocalRequests          bool     `yaml:"logLocalRequests"`
 	LogAllowedRequests        bool     `yaml:"logAllowedRequests"`
 	LogAPIRequests            bool     `yaml:"logApiRequests"`
-	Api                       string   `yaml:"api"`
-	ApiTimeoutMs              int      `yaml:"apiTimeoutMs"`
+	API                       string   `yaml:"api"`
+	APITimeoutMs              int      `yaml:"apiTimeoutMs"`
 	CacheSize                 int      `yaml:"cacheSize"`
 	ForceMonthlyUpdate        bool     `yaml:"forceMonthlyUpdate"`
 	AllowUnknownCountries     bool     `yaml:"allowUnknownCountries"`
@@ -41,7 +42,7 @@ type Config struct {
 	Countries                 []string `yaml:"countries,omitempty"`
 }
 
-type IpEntry struct {
+type ipEntry struct {
 	Country   string
 	Timestamp time.Time
 }
@@ -58,7 +59,7 @@ type GeoBlock struct {
 	logLocalRequests      bool
 	logAllowedRequests    bool
 	logAPIRequests        bool
-	apiUri                string
+	apiURI                string
 	apiTimeoutMs          int
 	forceMonthlyUpdate    bool
 	allowUnknownCountries bool
@@ -70,8 +71,8 @@ type GeoBlock struct {
 }
 
 // New created a new GeoBlock plugin.
-func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	if len(config.Api) == 0 || !strings.Contains(config.Api, "{ip}") {
+func New(_ context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	if len(config.API) == 0 || !strings.Contains(config.API, "{ip}") {
 		return nil, fmt.Errorf("no api uri given")
 	}
 
@@ -79,8 +80,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("no allowed country code provided")
 	}
 
-	if config.ApiTimeoutMs == 0 {
-		config.ApiTimeoutMs = 750
+	if config.APITimeoutMs == 0 {
+		config.APITimeoutMs = 750
 	}
 
 	infoLogger.SetOutput(os.Stdout)
@@ -89,8 +90,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	infoLogger.Printf("log local requests: %t", config.LogLocalRequests)
 	infoLogger.Printf("log allowed requests: %t", config.LogAllowedRequests)
 	infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
-	infoLogger.Printf("API uri: %s", config.Api)
-	infoLogger.Printf("API timeout: %d", config.ApiTimeoutMs)
+	infoLogger.Printf("API uri: %s", config.API)
+	infoLogger.Printf("API timeout: %d", config.APITimeoutMs)
 	infoLogger.Printf("cache size: %d", config.CacheSize)
 	infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
 	infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
@@ -108,20 +109,20 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		logLocalRequests:      config.LogLocalRequests,
 		logAllowedRequests:    config.LogAllowedRequests,
 		logAPIRequests:        config.LogAPIRequests,
-		apiUri:                config.Api,
-		apiTimeoutMs:          config.ApiTimeoutMs,
+		apiURI:                config.API,
+		apiTimeoutMs:          config.APITimeoutMs,
 		forceMonthlyUpdate:    config.ForceMonthlyUpdate,
 		allowUnknownCountries: config.AllowUnknownCountries,
 		unknownCountryCode:    config.UnknownCountryAPIResponse,
 		countries:             config.Countries,
-		privateIPRanges:       InitPrivateIPBlocks(),
+		privateIPRanges:       initPrivateIPBlocks(),
 		database:              cache,
 		name:                  name,
 	}, nil
 }
 
 func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	reqIPAddr, err := a.CollectRemoteIP(req)
+	reqIPAddr, err := a.collectRemoteIP(req)
 	if err != nil {
 		// if one of the ip addresses could not be parsed, return status forbidden
 		infoLogger.Println(err)
@@ -130,11 +131,11 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	for _, ipAddress := range reqIPAddr {
-		var entry IpEntry
+		var entry ipEntry
 		ipAddressString := ipAddress.String()
-		isPrivateIp := IsPrivateIP(*ipAddress, a.privateIPRanges)
+		privateIP := isPrivateIP(*ipAddress, a.privateIPRanges)
 
-		if isPrivateIp {
+		if privateIP {
 			if a.allowLocalRequests {
 				if a.logLocalRequests {
 					infoLogger.Println("Local ip allowed: ", ipAddress)
@@ -153,22 +154,22 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		cacheEntry, ok := a.database.Get(ipAddressString)
 
 		if !ok {
-			entry, err = a.CreateNewIPEntry(ipAddressString)
+			entry, err = a.createNewIPEntry(ipAddressString)
 
 			if err != nil {
 				rw.WriteHeader(http.StatusForbidden)
 				return
 			}
 		} else {
-			entry = cacheEntry.(IpEntry)
+			entry = cacheEntry.(ipEntry)
 
 			if a.logAPIRequests {
 				infoLogger.Println("Loaded from database: ", entry)
 			}
 
 			// check if existing entry was made more than a month ago, if so update the entry
-			if time.Since(entry.Timestamp).Hours() >= NumberOfHoursInMonth && a.forceMonthlyUpdate {
-				entry, err = a.CreateNewIPEntry(ipAddressString)
+			if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
+				entry, err = a.createNewIPEntry(ipAddressString)
 
 				if err != nil {
 					rw.WriteHeader(http.StatusForbidden)
@@ -177,24 +178,22 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 		}
 
-		var isAllowed bool = StringInSlice(entry.Country, a.countries) || (entry.Country == UnknownCountryCode && a.allowUnknownCountries)
+		isAllowed := stringInSlice(entry.Country, a.countries) || (entry.Country == unknownCountryCode && a.allowUnknownCountries)
 
 		if !isAllowed {
 			infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
 			rw.WriteHeader(http.StatusForbidden)
 
 			return
-		} else {
-			if a.logAllowedRequests {
-				infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
-			}
+		} else if a.logAllowedRequests {
+			infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
 		}
 	}
 
 	a.next.ServeHTTP(rw, req)
 }
 
-func (a *GeoBlock) CollectRemoteIP(req *http.Request) ([]*net.IP, error) {
+func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	var ipList []*net.IP
 
 	splitFn := func(c rune) bool {
@@ -204,11 +203,11 @@ func (a *GeoBlock) CollectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	xForwardedForValue := req.Header.Get(xForwardedFor)
 	xForwardedForIPs := strings.FieldsFunc(xForwardedForValue, splitFn)
 
-	xRealIpValue := req.Header.Get(xRealIp)
-	xRealIpIPs := strings.FieldsFunc(xRealIpValue, splitFn)
+	xRealIPValue := req.Header.Get(xRealIP)
+	xRealIPList := strings.FieldsFunc(xRealIPValue, splitFn)
 
 	for _, value := range xForwardedForIPs {
-		ipAddress, err := ParseIP(value)
+		ipAddress, err := parseIP(value)
 		if err != nil {
 			return ipList, fmt.Errorf("parsing failed: %s", err)
 		}
@@ -216,8 +215,8 @@ func (a *GeoBlock) CollectRemoteIP(req *http.Request) ([]*net.IP, error) {
 		ipList = append(ipList, &ipAddress)
 	}
 
-	for _, value := range xRealIpIPs {
-		ipAddress, err := ParseIP(value)
+	for _, value := range xRealIPList {
+		ipAddress, err := parseIP(value)
 		if err != nil {
 			return ipList, fmt.Errorf("parsing failed: %s", err)
 		}
@@ -228,16 +227,16 @@ func (a *GeoBlock) CollectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	return ipList, nil
 }
 
-func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
-	var entry IpEntry
+func (a *GeoBlock) createNewIPEntry(ipAddressString string) (ipEntry, error) {
+	var entry ipEntry
 
-	country, err := a.CallGeoJS(ipAddressString)
+	country, err := a.callGeoJS(ipAddressString)
 	if err != nil {
 		infoLogger.Println(err)
 		return entry, err
 	}
 
-	entry = IpEntry{Country: country, Timestamp: time.Now()}
+	entry = ipEntry{Country: country, Timestamp: time.Now()}
 	a.database.Add(ipAddressString, entry)
 
 	if a.logAPIRequests {
@@ -247,14 +246,14 @@ func (a *GeoBlock) CreateNewIPEntry(ipAddressString string) (IpEntry, error) {
 	return entry, nil
 }
 
-func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
+func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	geoJsClient := http.Client{
 		Timeout: time.Millisecond * time.Duration(a.apiTimeoutMs),
 	}
 
-	apiUri := strings.Replace(a.apiUri, "{ip}", ipAddress, 1)
+	apiURI := strings.Replace(a.apiURI, "{ip}", ipAddress, 1)
 
-	req, err := http.NewRequest(http.MethodGet, apiUri, nil)
+	req, err := http.NewRequest(http.MethodGet, apiURI, nil)
 	if err != nil {
 		return "", err
 	}
@@ -278,22 +277,22 @@ func (a *GeoBlock) CallGeoJS(ipAddress string) (string, error) {
 
 	// api response for unknown country
 	if len([]rune(countryCode)) == len(a.unknownCountryCode) && countryCode == a.unknownCountryCode {
-		return UnknownCountryCode, nil
+		return unknownCountryCode, nil
 	}
 
 	// this could possible cause a DoS attack
-	if len([]rune(countryCode)) != 2 {
+	if len([]rune(countryCode)) != countryCodeLength {
 		return "", fmt.Errorf("API response has more than 2 characters")
 	}
 
 	if a.logAPIRequests {
-		infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiUri)
+		infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiURI)
 	}
 
 	return countryCode, nil
 }
 
-func StringInSlice(a string, list []string) bool {
+func stringInSlice(a string, list []string) bool {
 	for _, b := range list {
 		if b == a {
 			return true
@@ -303,7 +302,7 @@ func StringInSlice(a string, list []string) bool {
 	return false
 }
 
-func ParseIP(addr string) (net.IP, error) {
+func parseIP(addr string) (net.IP, error) {
 	ipAddress := net.ParseIP(addr)
 
 	if ipAddress == nil {
@@ -314,7 +313,7 @@ func ParseIP(addr string) (net.IP, error) {
 }
 
 // https://stackoverflow.com/questions/41240761/check-if-ip-address-is-in-private-network-space
-func InitPrivateIPBlocks() []*net.IPNet {
+func initPrivateIPBlocks() []*net.IPNet {
 	var privateIPBlocks []*net.IPNet
 
 	for _, cidr := range []string{
@@ -337,7 +336,7 @@ func InitPrivateIPBlocks() []*net.IPNet {
 	return privateIPBlocks
 }
 
-func IsPrivateIP(ip net.IP, privateIPBlocks []*net.IPNet) bool {
+func isPrivateIP(ip net.IP, privateIPBlocks []*net.IPNet) bool {
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}

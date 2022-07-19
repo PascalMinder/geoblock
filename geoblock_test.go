@@ -1,4 +1,4 @@
-package GeoBlock_test
+package geoblock_test
 
 import (
 	"context"
@@ -7,31 +7,32 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	GeoBlock "github.com/PascalMinder/GeoBlock"
+	geoblock "github.com/PascalMinder/geoblock"
 )
 
 const (
 	xForwardedFor          = "X-Forwarded-For"
-	CA                     = "99.220.109.148"
-	CH                     = "82.220.110.18"
-	PrivateRange           = "192.168.1.1"
-	Invalid                = "192.168.1.X"
-	UnknownCountryIpGoogle = "66.249.93.100"
+	caExampleIP            = "99.220.109.148"
+	chExampleIP            = "82.220.110.18"
+	privateRangeIP         = "192.168.1.1"
+	invalidIP              = "192.168.1.X"
+	unknownCountryIPGoogle = "66.249.93.100"
+	apiURI                 = "https://get.geojs.io/v1/ip/country/{ip}"
 )
 
 func TestEmptyApi(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = ""
+	cfg.API = ""
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	_, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
 	// expect error
 	if err == nil {
@@ -40,18 +41,18 @@ func TestEmptyApi(t *testing.T) {
 }
 
 func TestMissingIpInApi(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/"
+	cfg.API = "https://get.geojs.io/v1/ip/country/"
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	_, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
 	// expect error
 	if err == nil {
@@ -60,18 +61,18 @@ func TestMissingIpInApi(t *testing.T) {
 }
 
 func TestEmptyAllowedCountryList(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = make([]string, 0)
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	_, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
 	// expect error
 	if err == nil {
@@ -79,19 +80,20 @@ func TestEmptyAllowedCountryList(t *testing.T) {
 	}
 }
 
-func TestAllowedContry(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+func TestAllowedCountry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
+	cfg.APITimeoutMs = 750
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,26 +105,26 @@ func TestAllowedContry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, CH)
+	req.Header.Add(xForwardedFor, chExampleIP)
 
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
-func TestMultipleAllowedContry(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+func TestMultipleAllowedCountry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH", "CA")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,28 +136,28 @@ func TestMultipleAllowedContry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, CH)
+	req.Header.Add(xForwardedFor, chExampleIP)
 
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
-func TestAllowedUnknownContry(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+func TestAllowedUnknownCountry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
 	cfg.AllowUnknownCountries = true
 	cfg.UnknownCountryAPIResponse = "nil"
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,28 +169,28 @@ func TestAllowedUnknownContry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, UnknownCountryIpGoogle)
+	req.Header.Add(xForwardedFor, unknownCountryIPGoogle)
 
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
-func TestDenyUnknownContry(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+func TestDenyUnknownCountry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
 	cfg.AllowUnknownCountries = false
 	cfg.UnknownCountryAPIResponse = "nil"
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,26 +202,26 @@ func TestDenyUnknownContry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, UnknownCountryIpGoogle)
+	req.Header.Add(xForwardedFor, unknownCountryIPGoogle)
 
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
-func TestAllowedContryCacheLookUp(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+func TestAllowedCountryCacheLookUp(t *testing.T) {
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +234,7 @@ func TestAllowedContryCacheLookUp(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		req.Header.Add(xForwardedFor, CH)
+		req.Header.Add(xForwardedFor, chExampleIP)
 
 		handler.ServeHTTP(recorder, req)
 
@@ -240,19 +242,19 @@ func TestAllowedContryCacheLookUp(t *testing.T) {
 	}
 }
 
-func TestDeniedContry(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+func TestDeniedCountry(t *testing.T) {
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +266,7 @@ func TestDeniedContry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, CA)
+	req.Header.Add(xForwardedFor, caExampleIP)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -272,18 +274,18 @@ func TestDeniedContry(t *testing.T) {
 }
 
 func TestAllowLocalIP(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = true
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +297,7 @@ func TestAllowLocalIP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, PrivateRange)
+	req.Header.Add(xForwardedFor, privateRangeIP)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -303,18 +305,18 @@ func TestAllowLocalIP(t *testing.T) {
 }
 
 func TestPrivateIPRange(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +328,7 @@ func TestPrivateIPRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, PrivateRange)
+	req.Header.Add(xForwardedFor, privateRangeIP)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -334,18 +336,18 @@ func TestPrivateIPRange(t *testing.T) {
 }
 
 func TestInvalidIp(t *testing.T) {
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
-	cfg.Api = "https://get.geojs.io/v1/ip/country/{ip}"
+	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +359,7 @@ func TestInvalidIp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, Invalid)
+	req.Header.Add(xForwardedFor, invalidIP)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -368,19 +370,19 @@ func TestInvalidApiResponse(t *testing.T) {
 	// set up our fake api server
 	var apiStub = httptest.NewServer(http.HandlerFunc(apiHandlerInvalid))
 
-	cfg := GeoBlock.CreateConfig()
+	cfg := geoblock.CreateConfig()
 
 	cfg.AllowLocalRequests = false
 	cfg.LogLocalRequests = false
 	fmt.Println(apiStub.URL)
-	cfg.Api = apiStub.URL + "/{ip}"
+	cfg.API = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
 
-	handler, err := GeoBlock.New(ctx, next, cfg, "GeoBlock")
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,9 +394,9 @@ func TestInvalidApiResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// the contry is allowed, but the api response is faulty.
+	// the country is allowed, but the api response is faulty.
 	// therefore the request should be blocked
-	req.Header.Add(xForwardedFor, CH)
+	req.Header.Add(xForwardedFor, chExampleIP)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -404,9 +406,7 @@ func TestInvalidApiResponse(t *testing.T) {
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
-	received := req.StatusCode
-
-	if received != expected {
+	if received := req.StatusCode; received != expected {
 		t.Errorf("invalid status code: %d <> %d", expected, received)
 	}
 }
