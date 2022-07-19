@@ -1,3 +1,4 @@
+// Package lrucache provides a very basic LRU cache implementation.
 package lrucache
 
 import (
@@ -141,9 +142,7 @@ func (c *LRUCache) Purge() {
 }
 
 func (c *LRUCache) removeOldest() {
-	e := c.evictList.Back()
-
-	if e != nil {
+	if e := c.evictList.Back(); e != nil {
 		c.removeElement(e)
 	}
 }

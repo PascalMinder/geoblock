@@ -1,13 +1,16 @@
 # GeoBlock
+
 Simple plugin for [Traefik](https://github.com/containous/traefik) to block request based on their country of origin. Uses [GeoJs.io](https://www.geojs.io/).
 
 ## Configuration
+
 Sample configuration in Traefik.
 
 ### Configuration as local plugin
 
 traefik.yml
-````
+
+````yml
 log:
   level: INFO
 
@@ -18,7 +21,8 @@ experimental:
 ````
 
 dynamic-configuration.yml
-````
+
+````yml
 http:
   middlewares:
     geoblock-ch:
@@ -39,7 +43,8 @@ http:
 ````
 
 docker-compose.yml
-````
+
+````yml
 version: "3.7"
 
 services:
@@ -50,7 +55,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /docker/config/traefik/traefik.yml:/etc/traefik/traefik.yml
       - /docker/config/traefik/dynamic-configuration.yml:/etc/traefik/dynamic-configuration.yml
-      - /plugin/GeoBlock:/plugins-local/src/github.com/PascalMinder/GeoBlock/
+      - /plugin/geoblock:/plugins-local/src/github.com/PascalMinder/geoblock/
 
     ports:
       - "80:80"
@@ -66,12 +71,13 @@ services:
 ````
 
 ## Sample configuration
+
 - `allowLocalRequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
 - `logLocalRequests`: If set to true, will log every connection from any IP in the private IP range
 - `api`: API URI used for querying the country associated with the connecting IP
 - `countries`: list of allowed countries
 
-````
+````yml
 my-GeoBlock:
     plugin:
         GeoBlock:
@@ -338,36 +344,47 @@ my-GeoBlock:
 ````
 
 ## Configuration options
-    
+
 ### Allow local requests: `allowLocalRequests`
+
 If set to true, will not block request from [Private IP Ranges](https://en.wikipedia.org/wiki/Private_network).
 
 ### Log local requests: `logLocalRequests`
+
 If set to true, will show a log message when some one accesses the service over a private ip address.
 
 ### Log allowed requests `logAllowedRequests`
+
 If set to true, will show a log message with the IP and the country of origin if a request is allowed.
 
 ### Log API requests `logApiRequests`
+
 If set to true, will show a log message for every API hit.
 
 ### API `api`
+
 Defines the API URL for the IP to Country resolution. The IP to fetch can be added with `{ip}` to the URL.
 
 ### API Timeout `apiTimeoutMs`
+
 Timeout for the call to the api uri.
 
 ### Cache size `cacheSize`
+
 Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.
 
 ### Force monthly update `forceMonthlyUpdate`
+
 Even if an IP stays in the cache for a period of a month (about 30 x 24 hours), it must be fetch again after a month.
 
 ### Allow unknown countries `allowUnknownCountries`
+
 Some IP addresses have no country associated with them. If this option is set to true, all IPs with no associated country are also allowed.  
 
 ### Unknown country api response`unknownCountryApiResponse`
+
 The API uri can be customized. This options allows to customize the response string of the API when a IP with no associated country is requested.
 
 ### Countries `countries`
-A list of country codes from which connections to the service should be allowed 
+
+A list of country codes from which connections to the service should be allowed

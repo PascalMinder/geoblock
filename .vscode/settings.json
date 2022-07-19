@@ -1,0 +1,29 @@
+{
+    "editor.formatOnSave": true,
+    "editor.formatOnPaste": true,
+    "[go]": {
+      "editor.tabSize": 4,
+      "editor.detectIndentation": false,
+      "editor.snippetSuggestions": "none",
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.organizeImports": true
+      }
+    },
+    "go.autocompleteUnimportedPackages": true,
+    "go.formatTool": "goimports",
+    "go.lintTool": "golangci-lint",
+    "go.buildOnSave": "workspace",
+    "go.lintOnSave": "workspace",
+    "go.vetOnSave": "package",
+    "gopls": {
+      "usePlaceholders": true, // add parameter placeholders when completing a function
+      // Experimental settings
+      "completeUnimported": true, // autocomplete unimported packages
+      "deepCompletion": true // enable deep completion
+    },
+    "go.useLanguageServer": true,
+    "cSpell.words": [
+      "geoblock"
+    ]
+  }

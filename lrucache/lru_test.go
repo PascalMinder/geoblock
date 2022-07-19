@@ -182,10 +182,8 @@ func TestLRUCacheKeys(t *testing.T) {
 		cache.Add("Apple_"+fmt.Sprint(i), 2.0+(0.1*float32(i)))
 	}
 
-	len := cache.Length()
-
-	if len != 10 {
-		t.Errorf("NewLRUCache() existing element = %v, want %v", len, 10)
+	if cacheLen := cache.Length(); cacheLen != 10 {
+		t.Errorf("NewLRUCache() existing element = %v, want %v", cacheLen, 10)
 	}
 
 	keys := cache.Keys()
@@ -209,17 +207,13 @@ func TestLRUCachePurge(t *testing.T) {
 		cache.Add("Apple_"+fmt.Sprint(i), 2.0+(0.1*float32(i)))
 	}
 
-	len := cache.Length()
-
-	if len != 10 {
-		t.Errorf("NewLRUCache() existing element = %v, want %v", len, 10)
+	if cacheLen := cache.Length(); cacheLen != 10 {
+		t.Errorf("NewLRUCache() existing element = %v, want %v", cacheLen, 10)
 	}
 
 	cache.Purge()
 
-	len = cache.Length()
-
-	if len != 0 {
-		t.Errorf("NewLRUCache() existing element = %v, want %v", len, 10)
+	if cacheLen := cache.Length(); cacheLen != 0 {
+		t.Errorf("NewLRUCache() existing element = %v, want %v", cacheLen, 10)
 	}
 }
