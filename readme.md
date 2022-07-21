@@ -4,9 +4,43 @@ Simple plugin for [Traefik](https://github.com/containous/traefik) to block requ
 
 ## Configuration
 
-Sample configuration in Traefik.
+It is possible to install the [plugin locally](https://traefik.io/blog/using-private-plugins-in-traefik-proxy-2-5/) or to install it through [Traefik Pilot](https://pilot.traefik.io/plugins).
 
 ### Configuration as local plugin
+
+Depending on your setup, the installation steps might differ from the one described here. This example assumes that your Traefik instance runs in a Docker container and uses the [official image](https://hub.docker.com/_/traefik/).
+
+Download the latest release of the plugin and save it to a location the Traefik container can reach. Below is an example of a possible setup. Notice how the plugin source is mapped into the container (`/plugin/geoblock:/plugins-local/src/github.com/PascalMinder/geoblock/`):
+
+docker-compose.yml
+
+````yml
+version: "3.7"
+
+services:
+  traefik:
+    image: traefik
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /docker/config/traefik/traefik.yml:/etc/traefik/traefik.yml
+      - /docker/config/traefik/dynamic-configuration.yml:/etc/traefik/dynamic-configuration.yml
+      - /docker/config/traefik/plugin/geoblock:/plugins-local/src/github.com/PascalMinder/geoblock/
+
+    ports:
+      - "80:80"
+
+  hello:
+    image: containous/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hello.entrypoints=http
+      - traefik.http.routers.hello.rule=Host(`hello.localhost`)
+      - traefik.http.services.hello.loadbalancer.server.port=80
+        - traefik.http.routers.hello.middlewares=my-plugin@file
+````
+
+To complete the setup, the Traefik configuration must be extended with the plugin. For this you must create the `traefik.yml` and the dynamic-configuration.yml` files if not present already.
 
 traefik.yml
 
@@ -17,7 +51,7 @@ log:
 experimental:
   localPlugins:
     geoblock:
-      moduleName: github.com/PascalMinder/GeoBlock
+      moduleName: github.com/PascalMinder/geoblock
 ````
 
 dynamic-configuration.yml
@@ -37,40 +71,101 @@ http:
           cacheSize: 15
           forceMonthlyUpdate: true
           allowUnknownCountries: false
-          unknownCountryApiResponse: nil
+          unknownCountryApiResponse: "nil"
           countries:
             - CH
 ````
 
-docker-compose.yml
+### Traefik Pilot
 
-````yml
-version: "3.7"
+To install the plugin with Traefik Pilot, follow the instruction on their website.
 
+Add the following to your `traefik-config.yml`
+
+```yml
+pilot:
+  token: "xxxx-your-token-xxxx"
+
+experimental:
+  plugins:
+    GeoBlock:
+      moduleName: "github.com/PascalMinder/geoblock"
+      version: "v0.2.3"
+
+# other stuff you might have in your traefik-config
+entryPoints:
+  http:
+    address: ":80"
+  https:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  file:
+    filename: "/dynamic-configuration.yml"
+```
+
+In your dynamic configuration add the following:
+
+```yml
+http:
+  middlewares:
+    my-GeoBlock:
+      plugin:
+        GeoBlock:
+          allowLocalRequests: true
+          logLocalRequests: false
+          logAllowedRequests: false
+          logApiRequests: false
+          api: "https://get.geojs.io/v1/ip/country/{ip}"
+          apiTimeoutMs: 500
+          cacheSize: 25
+          forceMonthlyUpdate: true
+          allowUnknownCountries: false
+          unknownCountryApiResponse: "nil"
+          countries:
+            - CH
+```
+
+And some example docker file for traefik:
+
+```yml
+version: "3"
+networks:
+  proxy:
+    external: true # specifies that this network has been created outside of Compose, raises an error if it doesn’t exist
 services:
   traefik:
-    image: traefik
-
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /docker/config/traefik/traefik.yml:/etc/traefik/traefik.yml
-      - /docker/config/traefik/dynamic-configuration.yml:/etc/traefik/dynamic-configuration.yml
-      - /plugin/geoblock:/plugins-local/src/github.com/PascalMinder/geoblock/
-
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      proxy:
+        aliases:
+          - traefik
     ports:
-      - "80:80"
-
-  hello:
-    image: containous/whoami
+      - 80:80
+      - 443:443
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/a/docker/config/traefik/data/traefik.yml:/traefik.yml:ro"
+      - "/a/docker/config/traefik/data/acme.json:/acme.json"
+      - "/a/docker/config/traefik/data/config.yml:/config.yml:ro"
+      - "/a/log/traefik:/etc/traefik"
+      - "/a/docker/config/traefik/data/dynamic-configuration.yml:/dynamic-configuration.yml"
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.hello.entrypoints=http
-      - traefik.http.routers.hello.rule=Host(`hello.localhost`)
-      - traefik.http.services.hello.loadbalancer.server.port=80
-        - traefik.http.routers.hello.middlewares=my-plugin@file
-````
+      - "providers.file.filename=/dynamic-configuration.yml"
+```
 
-## Sample configuration
+This configuration might not work. It's just to give you an idea how to configure it.
+
+## Full plugin sample configuration
 
 - `allowLocalRequests`: If set to true, will not block request from [Private IP Ranges](https://de.wikipedia.org/wiki/Private_IP-Adresse)
 - `logLocalRequests`: If set to true, will log every connection from any IP in the private IP range
