@@ -1,0 +1,36 @@
+version: "3.7"
+
+services:
+  traefik:
+    image: traefik:v2.8.1
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./../traefik-config/traefik.yml:/etc/traefik/traefik.yml
+      - ./../traefik-config/dynamic-configuration.yml:/etc/traefik/dynamic-configuration.yml
+      - ./../..:/plugins-local/src/github.com/PascalMinder/geoblock/
+
+    labels:
+      traefik.http.routers.dash.rule: Host(`dash.localhost`)
+      traefik.http.routers.dash.service: api@internal
+
+    ports:
+      - "80:80"
+
+  hello:
+    image: containous/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hello.entrypoints=http
+      - traefik.http.routers.hello.rule=Host(`hello.localhost`)
+      - traefik.http.services.hello.loadbalancer.server.port=80
+      - traefik.http.routers.hello.middlewares=my-plugin@file
+
+  whoami:
+    image: jwilder/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whoami.entrypoints=http
+      - traefik.http.routers.whoami.rule=Host(`whoami.localhost`)
+      - traefik.http.services.whoami.loadbalancer.server.port=8000
+      - traefik.http.routers.hello.middlewares=my-plugin@file

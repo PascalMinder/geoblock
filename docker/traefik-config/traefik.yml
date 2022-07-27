@@ -1,0 +1,25 @@
+log:
+  level: INFO
+
+experimental:
+  localPlugins:
+    geoblock:
+      moduleName: github.com/PascalMinder/geoblock
+
+# API and dashboard configuration
+api:
+  dashboard: true
+  insecure: true
+
+entryPoints:
+  http:
+    address: ":80"
+    forwardedHeaders:
+      insecure: true
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  file:
+    filename: /etc/traefik/dynamic-configuration.yml

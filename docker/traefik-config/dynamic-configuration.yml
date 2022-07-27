@@ -1,0 +1,17 @@
+http:
+  middlewares:
+    my-plugin:
+      plugin:
+        geoblock:
+          allowLocalRequests: true
+          logLocalRequests: false
+          logAllowedRequests: true
+          logApiRequests: false
+          api: "https://get.geojs.io/v1/ip/country/{ip}"
+          cacheSize: 15
+          forceMonthlyUpdate: true
+          allowUnknownCountries: false
+          unknownCountryApiResponse: "nil"
+          countries:
+            - GB
+            - IS
