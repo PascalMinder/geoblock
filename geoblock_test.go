@@ -21,13 +21,9 @@ const (
 )
 
 func TestEmptyApi(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
+	cfg := createTesterConfig()
 	cfg.API = ""
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -41,13 +37,9 @@ func TestEmptyApi(t *testing.T) {
 }
 
 func TestMissingIpInApi(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
+	cfg := createTesterConfig()
 	cfg.API = "https://get.geojs.io/v1/ip/country/"
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -61,13 +53,7 @@ func TestMissingIpInApi(t *testing.T) {
 }
 
 func TestEmptyAllowedCountryList(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
-	cfg.Countries = make([]string, 0)
-	cfg.CacheSize = 10
+	cfg := createTesterConfig()
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -81,14 +67,8 @@ func TestEmptyAllowedCountryList(t *testing.T) {
 }
 
 func TestAllowedCountry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
-	cfg.APITimeoutMs = 750
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -113,13 +93,8 @@ func TestAllowedCountry(t *testing.T) {
 }
 
 func TestMultipleAllowedCountry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH", "CA")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -144,15 +119,10 @@ func TestMultipleAllowedCountry(t *testing.T) {
 }
 
 func TestAllowedUnknownCountry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
+	cfg := createTesterConfig()
 
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.AllowUnknownCountries = true
-	cfg.UnknownCountryAPIResponse = "nil"
-	cfg.API = apiURI
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
+	cfg.AllowUnknownCountries = true
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -177,15 +147,8 @@ func TestAllowedUnknownCountry(t *testing.T) {
 }
 
 func TestDenyUnknownCountry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.AllowUnknownCountries = false
-	cfg.UnknownCountryAPIResponse = "nil"
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -210,13 +173,8 @@ func TestDenyUnknownCountry(t *testing.T) {
 }
 
 func TestAllowedCountryCacheLookUp(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -243,13 +201,8 @@ func TestAllowedCountryCacheLookUp(t *testing.T) {
 }
 
 func TestDeniedCountry(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -274,13 +227,9 @@ func TestDeniedCountry(t *testing.T) {
 }
 
 func TestAllowLocalIP(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = true
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
+	cfg.AllowLocalRequests = true
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -305,13 +254,8 @@ func TestAllowLocalIP(t *testing.T) {
 }
 
 func TestPrivateIPRange(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -336,13 +280,8 @@ func TestPrivateIPRange(t *testing.T) {
 }
 
 func TestInvalidIp(t *testing.T) {
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
-	cfg.API = apiURI
+	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -370,14 +309,10 @@ func TestInvalidApiResponse(t *testing.T) {
 	// set up our fake api server
 	var apiStub = httptest.NewServer(http.HandlerFunc(apiHandlerInvalid))
 
-	cfg := geoblock.CreateConfig()
-
-	cfg.AllowLocalRequests = false
-	cfg.LogLocalRequests = false
+	cfg := createTesterConfig()
 	fmt.Println(apiStub.URL)
 	cfg.API = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.CacheSize = 10
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -413,4 +348,22 @@ func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 
 func apiHandlerInvalid(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Invalid Response")
+}
+
+func createTesterConfig() *geoblock.Config {
+	cfg := geoblock.CreateConfig()
+
+	cfg.API = apiURI
+	cfg.APITimeoutMs = 750
+	cfg.AllowLocalRequests = false
+	cfg.AllowUnknownCountries = false
+	cfg.CacheSize = 10
+	cfg.Countries = make([]string, 0)
+	cfg.ForceMonthlyUpdate = true
+	cfg.LogAPIRequests = false
+	cfg.LogAllowedRequests = false
+	cfg.LogLocalRequests = false
+	cfg.UnknownCountryAPIResponse = "nil"
+
+	return cfg
 }
