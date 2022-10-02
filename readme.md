@@ -104,7 +104,7 @@ providers:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
   file:
-    filename: "/dynamic-configuration.yml"
+    filename: "/etc/traefik/dynamic-configuration.yml"
 ```
 
 In your dynamic configuration add the following:
@@ -154,13 +154,8 @@ services:
       - "/etc/timezone:/etc/timezone:ro"
       - "/etc/localtime:/etc/localtime:ro"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "/a/docker/config/traefik/data/traefik.yml:/traefik.yml:ro"
-      - "/a/docker/config/traefik/data/acme.json:/acme.json"
-      - "/a/docker/config/traefik/data/config.yml:/config.yml:ro"
-      - "/a/log/traefik:/etc/traefik"
-      - "/a/docker/config/traefik/data/dynamic-configuration.yml:/dynamic-configuration.yml"
-    labels:
-      - "providers.file.filename=/dynamic-configuration.yml"
+      - "/a/docker/config/traefik/data/traefik.yml:/etc/traefik/traefik.yml:ro"
+      - "/a/docker/config/traefik/data/dynamic-configuration.yml:/etc/traefik/dynamic-configuration.yml"
 ```
 
 This configuration might not work. It's just to give you an idea how to configure it.
