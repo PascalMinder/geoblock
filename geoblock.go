@@ -39,6 +39,7 @@ type Config struct {
 	ForceMonthlyUpdate        bool     `yaml:"forceMonthlyUpdate"`
 	AllowUnknownCountries     bool     `yaml:"allowUnknownCountries"`
 	UnknownCountryAPIResponse string   `yaml:"unknownCountryApiResponse"`
+	BlackListMode             bool     `yaml:"blacklist"`
 	Countries                 []string `yaml:"countries,omitempty"`
 }
 
@@ -64,6 +65,7 @@ type GeoBlock struct {
 	forceMonthlyUpdate    bool
 	allowUnknownCountries bool
 	unknownCountryCode    string
+	blackListMode         bool
 	countries             []string
 	privateIPRanges       []*net.IPNet
 	database              *lru.LRUCache
@@ -96,7 +98,8 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 	infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
 	infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
 	infoLogger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
-	infoLogger.Printf("allowed countries: %v", config.Countries)
+	infoLogger.Printf("blacklist mode: %t", config.BlackListMode)
+	infoLogger.Printf("countries: %v", config.Countries)
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
 	if err != nil {
@@ -114,6 +117,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		forceMonthlyUpdate:    config.ForceMonthlyUpdate,
 		allowUnknownCountries: config.AllowUnknownCountries,
 		unknownCountryCode:    config.UnknownCountryAPIResponse,
+		blackListMode:         config.BlackListMode,
 		countries:             config.Countries,
 		privateIPRanges:       initPrivateIPBlocks(),
 		database:              cache,
@@ -178,7 +182,8 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 		}
 
-		isAllowed := stringInSlice(entry.Country, a.countries) || (entry.Country == unknownCountryCode && a.allowUnknownCountries)
+		isAllowed := (stringInSlice(entry.Country, a.countries) != a.blackListMode) ||
+			(entry.Country == unknownCountryCode && a.allowUnknownCountries)
 
 		if !isAllowed {
 			infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
