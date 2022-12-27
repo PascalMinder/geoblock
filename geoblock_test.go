@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	xForwardedFor          = "X-Forwarded-For"
-	caExampleIP            = "99.220.109.148"
-	chExampleIP            = "82.220.110.18"
-	privateRangeIP         = "192.168.1.1"
-	invalidIP              = "192.168.1.X"
-	unknownCountryIPGoogle = "66.249.93.100"
-	apiURI                 = "https://get.geojs.io/v1/ip/country/{ip}"
+	xForwardedFor  = "X-Forwarded-For"
+	caExampleIP    = "99.220.109.148"
+	chExampleIP    = "82.220.110.18"
+	privateRangeIP = "192.168.1.1"
+	invalidIP      = "192.168.1.X"
+	unknownCountry = "1.1.1.1"
+	apiURI         = "https://get.geojs.io/v1/ip/country/{ip}"
 )
 
 func TestEmptyApi(t *testing.T) {
@@ -139,7 +139,7 @@ func TestAllowedUnknownCountry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, unknownCountryIPGoogle)
+	req.Header.Add(xForwardedFor, unknownCountry)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -165,7 +165,7 @@ func TestDenyUnknownCountry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, unknownCountryIPGoogle)
+	req.Header.Add(xForwardedFor, unknownCountry)
 
 	handler.ServeHTTP(recorder, req)
 
@@ -220,6 +220,60 @@ func TestDeniedCountry(t *testing.T) {
 	}
 
 	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestAllowBlacklistMode(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.BlackListMode = true
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestDenyBlacklistMode(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.BlackListMode = true
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, chExampleIP)
 
 	handler.ServeHTTP(recorder, req)
 
