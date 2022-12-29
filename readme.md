@@ -1,6 +1,6 @@
 # GeoBlock
 
-Simple plugin for [Traefik](https://github.com/containous/traefik) to block request based on their country of origin. Uses [GeoJs.io](https://www.geojs.io/).
+Simple plugin for [Traefik](https://github.com/containous/traefik) to block or allow requests based on their country of origin. Uses [GeoJs.io](https://www.geojs.io/).
 
 ## Configuration
 
@@ -10,9 +10,9 @@ It is possible to install the [plugin locally](https://traefik.io/blog/using-pri
 
 Depending on your setup, the installation steps might differ from the one described here. This example assumes that your Traefik instance runs in a Docker container and uses the [official image](https://hub.docker.com/_/traefik/).
 
-Download the latest release of the plugin and save it to a location the Traefik container can reach. Below is an example of a possible setup. Notice how the plugin source is mapped into the container (`/plugin/geoblock:/plugins-local/src/github.com/PascalMinder/geoblock/`):
+Download the latest release of the plugin and save it to a location the Traefik container can reach. Below is an example of a possible setup. Notice how the plugin source is mapped into the container (`/plugin/geoblock:/plugins-local/src/github.com/PascalMinder/geoblock/`) via a volume bind mount:
 
-docker-compose.yml
+#### `docker-compose.yml`
 
 ````yml
 version: "3.7"
@@ -37,12 +37,10 @@ services:
       - traefik.http.routers.hello.entrypoints=http
       - traefik.http.routers.hello.rule=Host(`hello.localhost`)
       - traefik.http.services.hello.loadbalancer.server.port=80
-        - traefik.http.routers.hello.middlewares=my-plugin@file
+      - traefik.http.routers.hello.middlewares=my-plugin@file
 ````
 
 To complete the setup, the Traefik configuration must be extended with the plugin. For this you must create the `traefik.yml` and the dynamic-configuration.yml` files if not present already.
-
-traefik.yml
 
 ````yml
 log:
@@ -54,7 +52,7 @@ experimental:
       moduleName: github.com/PascalMinder/geoblock
 ````
 
-dynamic-configuration.yml
+#### `dynamic-configuration.yml`
 
 ````yml
 http:
@@ -76,16 +74,13 @@ http:
             - CH
 ````
 
-### Traefik Pilot
+### Traefik Plugin registry
 
-To install the plugin with Traefik Pilot, follow the instruction on their website.
+This procedure will install the plugin via the [Traefik Plugin registry](https://plugins.traefik.io/install).
 
 Add the following to your `traefik-config.yml`
 
 ```yml
-pilot:
-  token: "xxxx-your-token-xxxx"
-
 experimental:
   plugins:
     GeoBlock:
@@ -166,6 +161,7 @@ This configuration might not work. It's just to give you an idea how to configur
 - `logLocalRequests`: If set to true, will log every connection from any IP in the private IP range
 - `api`: API URI used for querying the country associated with the connecting IP
 - `countries`: list of allowed countries
+- `backListMode`: set to `false` so the plugin is running in `whitelist mode`
 
 ````yml
 my-GeoBlock:
@@ -181,6 +177,7 @@ my-GeoBlock:
             forceMonthlyUpdate: false
             allowUnknownCountries: false
             unknownCountryApiResponse: "nil"
+            backListMode: false
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -471,10 +468,14 @@ Even if an IP stays in the cache for a period of a month (about 30 x 24 hours), 
 
 Some IP addresses have no country associated with them. If this option is set to true, all IPs with no associated country are also allowed.  
 
-### Unknown country api response`unknownCountryApiResponse`
+### Unknown country api response `unknownCountryApiResponse`
 
 The API uri can be customized. This options allows to customize the response string of the API when a IP with no associated country is requested.
 
+### Back list mode `blackListMode`
+
+When set to `true` the filter logic is inverted, i.e. requests originating from countries listed in the [`countries`](#countries-countries) list are **blocked**. Default: `false`.
+
 ### Countries `countries`
 
-A list of country codes from which connections to the service should be allowed
+A list of country codes from which connections to the service should be allowed. Logic can be inverted by using the [`blackListMode`](#back-list-mode-blacklistmode).
