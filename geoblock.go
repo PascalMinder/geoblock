@@ -41,6 +41,7 @@ type Config struct {
 	UnknownCountryAPIResponse string   `yaml:"unknownCountryApiResponse"`
 	BlackListMode             bool     `yaml:"blacklist"`
 	Countries                 []string `yaml:"countries,omitempty"`
+	AllowedIPAddresses        []string `yaml:"allowedIPAddresses,omitempty"`
 }
 
 type ipEntry struct {
@@ -67,6 +68,7 @@ type GeoBlock struct {
 	unknownCountryCode    string
 	blackListMode         bool
 	countries             []string
+	allowedIPAddresses    []net.IP
 	privateIPRanges       []*net.IPNet
 	database              *lru.LRUCache
 	name                  string
@@ -84,6 +86,15 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 
 	if config.APITimeoutMs == 0 {
 		config.APITimeoutMs = 750
+	}
+
+	allowedIPAddresses := make([]net.IP, len(config.AllowedIPAddresses))
+	for idx, ipAddressEntry := range config.AllowedIPAddresses {
+		ipAddress := net.ParseIP(ipAddressEntry)
+		if ipAddress == nil {
+			infoLogger.Fatal("Invalid ip address given!")
+		}
+		allowedIPAddresses[idx] = ipAddress
 	}
 
 	infoLogger.SetOutput(os.Stdout)
@@ -119,6 +130,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		unknownCountryCode:    config.UnknownCountryAPIResponse,
 		blackListMode:         config.BlackListMode,
 		countries:             config.Countries,
+		allowedIPAddresses:    allowedIPAddresses,
 		privateIPRanges:       initPrivateIPBlocks(),
 		database:              cache,
 		name:                  name,
@@ -152,6 +164,14 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				rw.WriteHeader(http.StatusForbidden)
 			}
 
+			return
+		}
+
+		if ipInSlice(*ipAddress, a.allowedIPAddresses) {
+			if a.logLocalRequests {
+				infoLogger.Println("Allow explicitly allowed ip: ", ipAddress)
+			}
+			a.next.ServeHTTP(rw, req)
 			return
 		}
 
@@ -304,6 +324,15 @@ func stringInSlice(a string, list []string) bool {
 		}
 	}
 
+	return false
+}
+
+func ipInSlice(a net.IP, list []net.IP) bool {
+	for _, b := range list {
+		if b.Equal(a) {
+			return true
+		}
+	}
 	return false
 }
 

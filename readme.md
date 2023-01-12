@@ -479,3 +479,7 @@ When set to `true` the filter logic is inverted, i.e. requests originating from 
 ### Countries `countries`
 
 A list of country codes from which connections to the service should be allowed. Logic can be inverted by using the [`blackListMode`](#back-list-mode-blacklistmode).
+
+### Allowed IP addresses `allowedIPAddresses`
+
+A list of explicitly allowed IP addresses. IP addresses added to this list will always be allowed.
