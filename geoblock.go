@@ -69,6 +69,7 @@ type GeoBlock struct {
 	blackListMode         bool
 	countries             []string
 	allowedIPAddresses    []net.IP
+	allowedIPRanges       []*net.IPNet
 	privateIPRanges       []*net.IPNet
 	database              *lru.LRUCache
 	name                  string
@@ -88,13 +89,21 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		config.APITimeoutMs = 750
 	}
 
-	allowedIPAddresses := make([]net.IP, len(config.AllowedIPAddresses))
-	for idx, ipAddressEntry := range config.AllowedIPAddresses {
+	var allowedIPAddresses []net.IP
+	var allowedIPRanges []*net.IPNet
+	for _, ipAddressEntry := range config.AllowedIPAddresses {
+		ip, ipBlock, err := net.ParseCIDR(ipAddressEntry)
+		if err == nil {
+			allowedIPAddresses = append(allowedIPAddresses, ip)
+			allowedIPRanges = append(allowedIPRanges, ipBlock)
+			continue
+		}
+
 		ipAddress := net.ParseIP(ipAddressEntry)
 		if ipAddress == nil {
 			infoLogger.Fatal("Invalid ip address given!")
 		}
-		allowedIPAddresses[idx] = ipAddress
+		allowedIPAddresses = append(allowedIPAddresses, ipAddress)
 	}
 
 	infoLogger.SetOutput(os.Stdout)
@@ -131,6 +140,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		blackListMode:         config.BlackListMode,
 		countries:             config.Countries,
 		allowedIPAddresses:    allowedIPAddresses,
+		allowedIPRanges:       allowedIPRanges,
 		privateIPRanges:       initPrivateIPBlocks(),
 		database:              cache,
 		name:                  name,
@@ -173,6 +183,16 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 			a.next.ServeHTTP(rw, req)
 			return
+		}
+
+		for _, ipRange := range a.allowedIPRanges {
+			if ipRange.Contains(*ipAddress) {
+				if a.logLocalRequests {
+					infoLogger.Println("Allow explicitly allowed ip: ", ipAddress)
+				}
+				a.next.ServeHTTP(rw, req)
+				return
+			}
 		}
 
 		cacheEntry, ok := a.database.Get(ipAddressString)

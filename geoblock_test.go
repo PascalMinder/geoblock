@@ -447,6 +447,118 @@ func TestExplicitlyAllowedIPNoMatch(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestExplicitlyAllowedIPRangeIPV6(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "2a00:00c0:2:3::567:8001/128")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "2a00:00c0:2:3::567:8001")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestExplicitlyAllowedIPRangeIPV6NoMatch(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "2a00:00c0:2:3::567:8001/128")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "2a00:00c0:2:3::567:8002")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestExplicitlyAllowedIPRangeIPV4(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "178.90.234.0/27")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "178.90.234.30")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestExplicitlyAllowedIPRangeIPV4NoMatch(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "178.90.234.0/27")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "178.90.234.55")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
