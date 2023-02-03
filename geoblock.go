@@ -42,6 +42,7 @@ type Config struct {
 	BlackListMode             bool     `yaml:"blacklist"`
 	Countries                 []string `yaml:"countries,omitempty"`
 	AllowedIPAddresses        []string `yaml:"allowedIPAddresses,omitempty"`
+	BlockedIPAddresses        []string `yaml:"blockedIPAddresses,omitempty"`
 }
 
 type ipEntry struct {
@@ -70,6 +71,8 @@ type GeoBlock struct {
 	countries             []string
 	allowedIPAddresses    []net.IP
 	allowedIPRanges       []*net.IPNet
+	blockedIPAddresses    []net.IP
+	blockedIPRanges       []*net.IPNet
 	privateIPRanges       []*net.IPNet
 	database              *lru.LRUCache
 	name                  string
@@ -104,6 +107,23 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 			infoLogger.Fatal("Invalid ip address given!")
 		}
 		allowedIPAddresses = append(allowedIPAddresses, ipAddress)
+	}
+
+	var blockedIPAddresses []net.IP
+	var blockedIPRanges []*net.IPNet
+	for _, ipAddressEntry := range config.BlockedIPAddresses {
+		ip, ipBlock, err := net.ParseCIDR(ipAddressEntry)
+		if err == nil {
+			blockedIPAddresses = append(blockedIPAddresses, ip)
+			blockedIPRanges = append(blockedIPRanges, ipBlock)
+			continue
+		}
+
+		ipAddress := net.ParseIP(ipAddressEntry)
+		if ipAddress == nil {
+			infoLogger.Fatal("Invalid ip address given!")
+		}
+		blockedIPAddresses = append(blockedIPAddresses, ipAddress)
 	}
 
 	infoLogger.SetOutput(os.Stdout)
@@ -141,6 +161,8 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		countries:             config.Countries,
 		allowedIPAddresses:    allowedIPAddresses,
 		allowedIPRanges:       allowedIPRanges,
+		blockedIPAddresses:    blockedIPAddresses,
+		blockedIPRanges:       blockedIPRanges,
 		privateIPRanges:       initPrivateIPBlocks(),
 		database:              cache,
 		name:                  name,
@@ -191,6 +213,25 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 					infoLogger.Println("Allow explicitly allowed ip: ", ipAddress)
 				}
 				a.next.ServeHTTP(rw, req)
+				return
+			}
+		}
+
+		// Blocked IP-List
+		if ipInSlice(*ipAddress, a.blockedIPAddresses) {
+			if a.logLocalRequests {
+				infoLogger.Println("Block explicitly blocked ip: ", ipAddress)
+			}
+			rw.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		for _, ipRange := range a.blockedIPRanges {
+			if ipRange.Contains(*ipAddress) {
+				if a.logLocalRequests {
+					infoLogger.Println("Block explicitly blocked ip: ", ipAddress)
+				}
+				rw.WriteHeader(http.StatusForbidden)
 				return
 			}
 		}

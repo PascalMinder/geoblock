@@ -559,6 +559,90 @@ func TestExplicitlyAllowedIPRangeIPV4NoMatch(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestExplicitlyBlockedIPV4(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.BlockedIPAddresses = append(cfg.BlockedIPAddresses, caExampleIP)
+	cfg.LogLocalRequests = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestExplicitlyBlockedIPRangeIPV4(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.BlockedIPAddresses = append(cfg.BlockedIPAddresses, "178.90.234.0/27")
+	cfg.BlockedIPAddresses = append(cfg.BlockedIPAddresses, "8.8.8.8")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "178.90.234.30")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestExplicitlyBlockedIPRangeIPV6(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.BlockedIPAddresses = append(cfg.BlockedIPAddresses, "2a00:00c0:2:3::567:8001/128")
+	cfg.BlockedIPAddresses = append(cfg.BlockedIPAddresses, "8.8.8.8")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "2a00:00c0:2:3::567:8001")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
