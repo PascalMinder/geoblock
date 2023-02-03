@@ -490,3 +490,14 @@ allowedIPAddresses:
   - 203.0.113.0/24      # IPv4 range in CIDR format  
   - 2001:db8:1234:/48   # IPv6 range in CIDR format
 ```
+
+### Blocked IP addresses `blockedIPAddresses`
+
+A list of explicitly blocked IP addresses or IP address ranges. IP addresses and ranges added to this list will always be blocked.
+
+```yaml
+blockedIPAddresses:
+  - 192.0.2.10          # single IPv4 address
+  - 203.0.113.0/24      # IPv4 range in CIDR format  
+  - 2001:db8:1234:/48   # IPv6 range in CIDR format
+```
