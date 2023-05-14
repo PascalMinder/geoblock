@@ -85,7 +85,7 @@ experimental:
   plugins:
     GeoBlock:
       moduleName: "github.com/PascalMinder/geoblock"
-      version: "v0.2.3"
+      version: "v0.2.5"
 
 # other stuff you might have in your traefik-config
 entryPoints:
@@ -161,7 +161,7 @@ This configuration might not work. It's just to give you an idea how to configur
 - `logLocalRequests`: If set to true, will log every connection from any IP in the private IP range
 - `api`: API URI used for querying the country associated with the connecting IP
 - `countries`: list of allowed countries
-- `backListMode`: set to `false` so the plugin is running in `whitelist mode`
+- `blackListMode`: set to `false` so the plugin is running in `whitelist mode`
 
 ````yml
 my-GeoBlock:
@@ -177,7 +177,7 @@ my-GeoBlock:
             forceMonthlyUpdate: false
             allowUnknownCountries: false
             unknownCountryApiResponse: "nil"
-            backListMode: false
+            BlackListMode: false
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -472,13 +472,13 @@ Some IP addresses have no country associated with them. If this option is set to
 
 The API uri can be customized. This options allows to customize the response string of the API when a IP with no associated country is requested.
 
-### Back list mode `blackListMode`
+### Black list mode `blackListMode`
 
 When set to `true` the filter logic is inverted, i.e. requests originating from countries listed in the [`countries`](#countries-countries) list are **blocked**. Default: `false`.
 
 ### Countries `countries`
 
-A list of country codes from which connections to the service should be allowed. Logic can be inverted by using the [`blackListMode`](#back-list-mode-blacklistmode).
+A list of country codes from which connections to the service should be allowed. Logic can be inverted by using the [`blackListMode`](#black-list-mode-blacklistmode).
 
 ### Allowed IP addresses `allowedIPAddresses`
 
