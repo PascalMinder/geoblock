@@ -177,7 +177,7 @@ my-GeoBlock:
             forceMonthlyUpdate: false
             allowUnknownCountries: false
             unknownCountryApiResponse: "nil"
-            BlackListMode: false
+            blackListMode: false
             countries:
                 - AF # Afghanistan
                 - AL # Albania
