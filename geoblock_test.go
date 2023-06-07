@@ -12,6 +12,7 @@ import (
 
 const (
 	xForwardedFor  = "X-Forwarded-For"
+	CountryHeader  = "X-IPCountry"
 	caExampleIP    = "99.220.109.148"
 	chExampleIP    = "82.220.110.18"
 	privateRangeIP = "192.168.1.1"
@@ -559,11 +560,46 @@ func TestExplicitlyAllowedIPRangeIPV4NoMatch(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestCountryHeader(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.AddCountryHeader = true
+	cfg.Countries = append(cfg.Countries, "CA")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertHeader(t, req, CountryHeader, "CA")
+}
+
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
 	if received := req.StatusCode; received != expected {
 		t.Errorf("invalid status code: %d <> %d", expected, received)
+	}
+}
+
+func assertHeader(t *testing.T, req *http.Request, key string, expected string) {
+	t.Helper()
+
+	if received := req.Header.Get(key); received != expected {
+		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
 	}
 }
 

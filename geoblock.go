@@ -18,6 +18,7 @@ import (
 const (
 	xForwardedFor        = "X-Forwarded-For"
 	xRealIP              = "X-Real-IP"
+	countryHeader        = "X-IPCountry"
 	numberOfHoursInMonth = 30 * 24
 	unknownCountryCode   = "AA"
 	countryCodeLength    = 2
@@ -42,6 +43,7 @@ type Config struct {
 	BlackListMode             bool     `yaml:"blacklist"`
 	Countries                 []string `yaml:"countries,omitempty"`
 	AllowedIPAddresses        []string `yaml:"allowedIPAddresses,omitempty"`
+	AddCountryHeader          bool     `yaml:"addCountryHeader"`
 }
 
 type ipEntry struct {
@@ -71,6 +73,7 @@ type GeoBlock struct {
 	allowedIPAddresses    []net.IP
 	allowedIPRanges       []*net.IPNet
 	privateIPRanges       []*net.IPNet
+	addCountryHeader      bool
 	database              *lru.LRUCache
 	name                  string
 }
@@ -119,6 +122,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 	infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
 	infoLogger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
 	infoLogger.Printf("blacklist mode: %t", config.BlackListMode)
+	infoLogger.Printf("add country header: %t", config.AddCountryHeader)
 	infoLogger.Printf("countries: %v", config.Countries)
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
@@ -143,6 +147,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		allowedIPRanges:       allowedIPRanges,
 		privateIPRanges:       initPrivateIPBlocks(),
 		database:              cache,
+		addCountryHeader:      config.AddCountryHeader,
 		name:                  name,
 	}, nil
 }
@@ -232,6 +237,10 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			return
 		} else if a.logAllowedRequests {
 			infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
+		}
+
+		if a.addCountryHeader {
+			req.Header.Set(countryHeader, entry.Country)
 		}
 	}
 

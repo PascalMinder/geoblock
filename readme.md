@@ -178,6 +178,7 @@ my-GeoBlock:
             allowUnknownCountries: false
             unknownCountryApiResponse: "nil"
             blackListMode: false
+            addCountryHeader: false
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -490,3 +491,7 @@ allowedIPAddresses:
   - 203.0.113.0/24      # IPv4 range in CIDR format  
   - 2001:db8:1234:/48   # IPv6 range in CIDR format
 ```
+
+### Add Header to request with Country Code: `addCountryHeader`
+
+If set to `true`, adds the X-IPCountry header to the HTTP request header. The header contains the two letter country code returned by cache or API request.
