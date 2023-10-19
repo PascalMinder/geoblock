@@ -30,6 +30,7 @@ var (
 
 // Config the plugin configuration.
 type Config struct {
+	SilentStartUp             bool     `yaml:"silentStartUp"`
 	AllowLocalRequests        bool     `yaml:"allowLocalRequests"`
 	LogLocalRequests          bool     `yaml:"logLocalRequests"`
 	LogAllowedRequests        bool     `yaml:"logAllowedRequests"`
@@ -59,6 +60,7 @@ func CreateConfig() *Config {
 // GeoBlock a Traefik plugin.
 type GeoBlock struct {
 	next                  http.Handler
+	silentStartUp         bool
 	allowLocalRequests    bool
 	logLocalRequests      bool
 	logAllowedRequests    bool
@@ -111,19 +113,21 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 
 	infoLogger.SetOutput(os.Stdout)
 
-	infoLogger.Printf("allow local IPs: %t", config.AllowLocalRequests)
-	infoLogger.Printf("log local requests: %t", config.LogLocalRequests)
-	infoLogger.Printf("log allowed requests: %t", config.LogAllowedRequests)
-	infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
-	infoLogger.Printf("API uri: %s", config.API)
-	infoLogger.Printf("API timeout: %d", config.APITimeoutMs)
-	infoLogger.Printf("cache size: %d", config.CacheSize)
-	infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
-	infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
-	infoLogger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
-	infoLogger.Printf("blacklist mode: %t", config.BlackListMode)
-	infoLogger.Printf("add country header: %t", config.AddCountryHeader)
-	infoLogger.Printf("countries: %v", config.Countries)
+	if !config.SilentStartUp {
+		infoLogger.Printf("allow local IPs: %t", config.AllowLocalRequests)
+		infoLogger.Printf("log local requests: %t", config.LogLocalRequests)
+		infoLogger.Printf("log allowed requests: %t", config.LogAllowedRequests)
+		infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
+		infoLogger.Printf("API uri: %s", config.API)
+		infoLogger.Printf("API timeout: %d", config.APITimeoutMs)
+		infoLogger.Printf("cache size: %d", config.CacheSize)
+		infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
+		infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
+		infoLogger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
+		infoLogger.Printf("blacklist mode: %t", config.BlackListMode)
+		infoLogger.Printf("add country header: %t", config.AddCountryHeader)
+		infoLogger.Printf("countries: %v", config.Countries)
+	}
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
 	if err != nil {
@@ -132,6 +136,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 
 	return &GeoBlock{
 		next:                  next,
+		silentStartUp:         config.SilentStartUp,
 		allowLocalRequests:    config.AllowLocalRequests,
 		logLocalRequests:      config.LogLocalRequests,
 		logAllowedRequests:    config.LogAllowedRequests,

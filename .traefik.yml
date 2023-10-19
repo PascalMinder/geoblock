@@ -6,6 +6,7 @@ import: github.com/PascalMinder/geoblock
 summary: "block request based on their country of origin"
 
 testData:
+  silentStartUp: false
   allowLocalRequests: false
   logLocalRequests: false
   logAllowedRequests: false

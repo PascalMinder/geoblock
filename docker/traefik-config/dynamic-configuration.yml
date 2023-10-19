@@ -3,6 +3,7 @@ http:
     my-plugin:
       plugin:
         geoblock:
+          silentStartUp: false
           allowLocalRequests: true
           logLocalRequests: false
           logAllowedRequests: true
