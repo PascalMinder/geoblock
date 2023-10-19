@@ -60,6 +60,7 @@ http:
     geoblock-ch:
       plugin:
         geoblock:
+          silentStartUp: false
           allowLocalRequests: true
           logLocalRequests: false
           logAllowedRequests: false
@@ -110,6 +111,7 @@ http:
     my-GeoBlock:
       plugin:
         GeoBlock:
+          silentStartUp: false
           allowLocalRequests: true
           logLocalRequests: false
           logAllowedRequests: false
@@ -167,6 +169,7 @@ This configuration might not work. It's just to give you an idea how to configur
 my-GeoBlock:
     plugin:
         GeoBlock:
+            silentStartUp: false
             allowLocalRequests: false
             logLocalRequests: false
             logAllowedRequests: false
@@ -432,6 +435,10 @@ my-GeoBlock:
 ````
 
 ## Configuration options
+
+### Silent start-up: `silentStartUp`
+
+If set to true, the configuration is not written to the output upon the start-up of the plugin.
 
 ### Allow local requests: `allowLocalRequests`
 
