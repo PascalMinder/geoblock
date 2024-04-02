@@ -464,6 +464,10 @@ Defines the API URL for the IP to Country resolution. The IP to fetch can be add
 
 Timeout for the call to the api uri.
 
+### Ignore the API timeout error `ignoreAPITimeout`
+
+If the `ignoreAPITimeout` option is set to `true`, a request is allowed even if the API could not be reached.
+
 ### Cache size `cacheSize`
 
 Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	geoblock "github.com/PascalMinder/geoblock"
 )
@@ -393,6 +394,76 @@ func TestInvalidApiResponse(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestApiResponseTimeoutAllowed(t *testing.T) {
+	// set up our fake api server
+	var apiStub = httptest.NewServer(http.HandlerFunc(apiTimeout))
+
+	cfg := createTesterConfig()
+	fmt.Println(apiStub.URL)
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.APITimeoutMs = 5
+	cfg.IgnoreAPITimeout = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the country is allowed, but the api response is faulty.
+	// therefore the request should be blocked
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestApiResponseTimeoutNotAllowed(t *testing.T) {
+	// set up our fake api server
+	var apiStub = httptest.NewServer(http.HandlerFunc(apiTimeout))
+
+	cfg := createTesterConfig()
+	fmt.Println(apiStub.URL)
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.APITimeoutMs = 5
+	cfg.IgnoreAPITimeout = false
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the country is allowed, but the api response is faulty.
+	// therefore the request should be blocked
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
 func TestExplicitlyAllowedIP(t *testing.T) {
 	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
@@ -605,6 +676,14 @@ func assertHeader(t *testing.T, req *http.Request, key string, expected string) 
 
 func apiHandlerInvalid(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Invalid Response")
+}
+
+func apiTimeout(w http.ResponseWriter, r *http.Request) {
+	var result = ``
+	// Add waiting time for response
+	time.Sleep(20 * time.Millisecond)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(result))
 }
 
 func createTesterConfig() *geoblock.Config {
