@@ -4,7 +4,7 @@ package geoblock
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	infoLogger = log.New(ioutil.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
+	infoLogger = log.New(io.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
 )
 
 // Config the plugin configuration.
@@ -37,6 +37,7 @@ type Config struct {
 	LogAPIRequests            bool     `yaml:"logApiRequests"`
 	API                       string   `yaml:"api"`
 	APITimeoutMs              int      `yaml:"apiTimeoutMs"`
+	IgnoreAPITimeout          bool     `yaml:"ignoreApiTimeout"`
 	CacheSize                 int      `yaml:"cacheSize"`
 	ForceMonthlyUpdate        bool     `yaml:"forceMonthlyUpdate"`
 	AllowUnknownCountries     bool     `yaml:"allowUnknownCountries"`
@@ -67,6 +68,7 @@ type GeoBlock struct {
 	logAPIRequests        bool
 	apiURI                string
 	apiTimeoutMs          int
+	ignoreAPITimeout      bool
 	forceMonthlyUpdate    bool
 	allowUnknownCountries bool
 	unknownCountryCode    string
@@ -120,6 +122,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
 		infoLogger.Printf("API uri: %s", config.API)
 		infoLogger.Printf("API timeout: %d", config.APITimeoutMs)
+		infoLogger.Printf("ignore API timeout: %t", config.IgnoreAPITimeout)
 		infoLogger.Printf("cache size: %d", config.CacheSize)
 		infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
 		infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
@@ -143,6 +146,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		logAPIRequests:        config.LogAPIRequests,
 		apiURI:                config.API,
 		apiTimeoutMs:          config.APITimeoutMs,
+		ignoreAPITimeout:      config.IgnoreAPITimeout,
 		forceMonthlyUpdate:    config.ForceMonthlyUpdate,
 		allowUnknownCountries: config.AllowUnknownCountries,
 		unknownCountryCode:    config.UnknownCountryAPIResponse,
@@ -208,10 +212,14 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		cacheEntry, ok := a.database.Get(ipAddressString)
 
 		if !ok {
-			entry, err = a.createNewIPEntry(ipAddressString)
+			entry, err = a.createNewIPEntry(ipAddressString, a.ignoreAPITimeout)
 
-			if err != nil {
+			if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
 				rw.WriteHeader(http.StatusForbidden)
+				return
+			} else if os.IsTimeout(err) && a.ignoreAPITimeout {
+				infoLogger.Printf("%s: request allowed [%s] due to API timeout!", a.name, ipAddress)
+				a.next.ServeHTTP(rw, req)
 				return
 			}
 		} else {
@@ -223,7 +231,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 			// check if existing entry was made more than a month ago, if so update the entry
 			if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
-				entry, err = a.createNewIPEntry(ipAddressString)
+				entry, err = a.createNewIPEntry(ipAddressString, a.ignoreAPITimeout)
 
 				if err != nil {
 					rw.WriteHeader(http.StatusForbidden)
@@ -286,12 +294,14 @@ func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	return ipList, nil
 }
 
-func (a *GeoBlock) createNewIPEntry(ipAddressString string) (ipEntry, error) {
+func (a *GeoBlock) createNewIPEntry(ipAddressString string, ignoreApiTimeout bool) (ipEntry, error) {
 	var entry ipEntry
 
 	country, err := a.callGeoJS(ipAddressString)
 	if err != nil {
-		infoLogger.Println(err)
+		if !(os.IsTimeout(err) || ignoreApiTimeout) {
+			infoLogger.Println(err)
+		}
 		return entry, err
 	}
 
@@ -326,7 +336,7 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 		defer res.Body.Close()
 	}
 
-	body, err := ioutil.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", err
 	}
