@@ -30,22 +30,23 @@ var (
 
 // Config the plugin configuration.
 type Config struct {
-	SilentStartUp             bool     `yaml:"silentStartUp"`
-	AllowLocalRequests        bool     `yaml:"allowLocalRequests"`
-	LogLocalRequests          bool     `yaml:"logLocalRequests"`
-	LogAllowedRequests        bool     `yaml:"logAllowedRequests"`
-	LogAPIRequests            bool     `yaml:"logApiRequests"`
-	API                       string   `yaml:"api"`
-	APITimeoutMs              int      `yaml:"apiTimeoutMs"`
-	IgnoreAPITimeout          bool     `yaml:"ignoreApiTimeout"`
-	CacheSize                 int      `yaml:"cacheSize"`
-	ForceMonthlyUpdate        bool     `yaml:"forceMonthlyUpdate"`
-	AllowUnknownCountries     bool     `yaml:"allowUnknownCountries"`
-	UnknownCountryAPIResponse string   `yaml:"unknownCountryApiResponse"`
-	BlackListMode             bool     `yaml:"blacklist"`
-	Countries                 []string `yaml:"countries,omitempty"`
-	AllowedIPAddresses        []string `yaml:"allowedIPAddresses,omitempty"`
-	AddCountryHeader          bool     `yaml:"addCountryHeader"`
+	SilentStartUp                bool     `yaml:"silentStartUp"`
+	AllowLocalRequests           bool     `yaml:"allowLocalRequests"`
+	LogLocalRequests             bool     `yaml:"logLocalRequests"`
+	LogAllowedRequests           bool     `yaml:"logAllowedRequests"`
+	LogAPIRequests               bool     `yaml:"logApiRequests"`
+	API                          string   `yaml:"api"`
+	APITimeoutMs                 int      `yaml:"apiTimeoutMs"`
+	IgnoreAPITimeout             bool     `yaml:"ignoreApiTimeout"`
+	IPGeolocationHTTPHeaderField string   `yaml:"ipGeolocationHttpHeaderField"`
+	CacheSize                    int      `yaml:"cacheSize"`
+	ForceMonthlyUpdate           bool     `yaml:"forceMonthlyUpdate"`
+	AllowUnknownCountries        bool     `yaml:"allowUnknownCountries"`
+	UnknownCountryAPIResponse    string   `yaml:"unknownCountryApiResponse"`
+	BlackListMode                bool     `yaml:"blacklist"`
+	Countries                    []string `yaml:"countries,omitempty"`
+	AllowedIPAddresses           []string `yaml:"allowedIPAddresses,omitempty"`
+	AddCountryHeader             bool     `yaml:"addCountryHeader"`
 }
 
 type ipEntry struct {
@@ -60,26 +61,27 @@ func CreateConfig() *Config {
 
 // GeoBlock a Traefik plugin.
 type GeoBlock struct {
-	next                  http.Handler
-	silentStartUp         bool
-	allowLocalRequests    bool
-	logLocalRequests      bool
-	logAllowedRequests    bool
-	logAPIRequests        bool
-	apiURI                string
-	apiTimeoutMs          int
-	ignoreAPITimeout      bool
-	forceMonthlyUpdate    bool
-	allowUnknownCountries bool
-	unknownCountryCode    string
-	blackListMode         bool
-	countries             []string
-	allowedIPAddresses    []net.IP
-	allowedIPRanges       []*net.IPNet
-	privateIPRanges       []*net.IPNet
-	addCountryHeader      bool
-	database              *lru.LRUCache
-	name                  string
+	next                         http.Handler
+	silentStartUp                bool
+	allowLocalRequests           bool
+	logLocalRequests             bool
+	logAllowedRequests           bool
+	logAPIRequests               bool
+	apiURI                       string
+	apiTimeoutMs                 int
+	ignoreAPITimeout             bool
+	iPGeolocationHTTPHeaderField string
+	forceMonthlyUpdate           bool
+	allowUnknownCountries        bool
+	unknownCountryCode           string
+	blackListMode                bool
+	countries                    []string
+	allowedIPAddresses           []net.IP
+	allowedIPRanges              []*net.IPNet
+	privateIPRanges              []*net.IPNet
+	addCountryHeader             bool
+	database                     *lru.LRUCache
+	name                         string
 }
 
 // New created a new GeoBlock plugin.
@@ -120,6 +122,11 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		infoLogger.Printf("log local requests: %t", config.LogLocalRequests)
 		infoLogger.Printf("log allowed requests: %t", config.LogAllowedRequests)
 		infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
+		if len(config.IPGeolocationHTTPHeaderField) == 0 {
+			infoLogger.Printf("use custom HTTP header field for country lookup: %t", false)
+		} else {
+			infoLogger.Printf("use custom HTTP header field for country lookup: %t [%s]", true, config.IPGeolocationHTTPHeaderField)
+		}
 		infoLogger.Printf("API uri: %s", config.API)
 		infoLogger.Printf("API timeout: %d", config.APITimeoutMs)
 		infoLogger.Printf("ignore API timeout: %t", config.IgnoreAPITimeout)
@@ -138,26 +145,27 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 	}
 
 	return &GeoBlock{
-		next:                  next,
-		silentStartUp:         config.SilentStartUp,
-		allowLocalRequests:    config.AllowLocalRequests,
-		logLocalRequests:      config.LogLocalRequests,
-		logAllowedRequests:    config.LogAllowedRequests,
-		logAPIRequests:        config.LogAPIRequests,
-		apiURI:                config.API,
-		apiTimeoutMs:          config.APITimeoutMs,
-		ignoreAPITimeout:      config.IgnoreAPITimeout,
-		forceMonthlyUpdate:    config.ForceMonthlyUpdate,
-		allowUnknownCountries: config.AllowUnknownCountries,
-		unknownCountryCode:    config.UnknownCountryAPIResponse,
-		blackListMode:         config.BlackListMode,
-		countries:             config.Countries,
-		allowedIPAddresses:    allowedIPAddresses,
-		allowedIPRanges:       allowedIPRanges,
-		privateIPRanges:       initPrivateIPBlocks(),
-		database:              cache,
-		addCountryHeader:      config.AddCountryHeader,
-		name:                  name,
+		next:                         next,
+		silentStartUp:                config.SilentStartUp,
+		allowLocalRequests:           config.AllowLocalRequests,
+		logLocalRequests:             config.LogLocalRequests,
+		logAllowedRequests:           config.LogAllowedRequests,
+		logAPIRequests:               config.LogAPIRequests,
+		apiURI:                       config.API,
+		apiTimeoutMs:                 config.APITimeoutMs,
+		ignoreAPITimeout:             config.IgnoreAPITimeout,
+		iPGeolocationHTTPHeaderField: config.IPGeolocationHTTPHeaderField,
+		forceMonthlyUpdate:           config.ForceMonthlyUpdate,
+		allowUnknownCountries:        config.AllowUnknownCountries,
+		unknownCountryCode:           config.UnknownCountryAPIResponse,
+		blackListMode:                config.BlackListMode,
+		countries:                    config.Countries,
+		allowedIPAddresses:           allowedIPAddresses,
+		allowedIPRanges:              allowedIPRanges,
+		privateIPRanges:              initPrivateIPBlocks(),
+		database:                     cache,
+		addCountryHeader:             config.AddCountryHeader,
+		name:                         name,
 	}, nil
 }
 
@@ -212,7 +220,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		cacheEntry, ok := a.database.Get(ipAddressString)
 
 		if !ok {
-			entry, err = a.createNewIPEntry(ipAddressString, a.ignoreAPITimeout)
+			entry, err = a.createNewIPEntry(req, ipAddressString)
 
 			if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
 				rw.WriteHeader(http.StatusForbidden)
@@ -231,7 +239,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 			// check if existing entry was made more than a month ago, if so update the entry
 			if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
-				entry, err = a.createNewIPEntry(ipAddressString, a.ignoreAPITimeout)
+				entry, err = a.createNewIPEntry(req, ipAddressString)
 
 				if err != nil {
 					rw.WriteHeader(http.StatusForbidden)
@@ -294,14 +302,11 @@ func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	return ipList, nil
 }
 
-func (a *GeoBlock) createNewIPEntry(ipAddressString string, ignoreApiTimeout bool) (ipEntry, error) {
+func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (ipEntry, error) {
 	var entry ipEntry
 
-	country, err := a.callGeoJS(ipAddressString)
+	country, err := a.getCountryCode(req, ipAddressString)
 	if err != nil {
-		if !(os.IsTimeout(err) || ignoreApiTimeout) {
-			infoLogger.Println(err)
-		}
 		return entry, err
 	}
 
@@ -313,6 +318,31 @@ func (a *GeoBlock) createNewIPEntry(ipAddressString string, ignoreApiTimeout boo
 	}
 
 	return entry, nil
+}
+
+func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (string, error) {
+	if len(a.iPGeolocationHTTPHeaderField) != 0 {
+		country, err := a.readIpGeolocationHttpHeader(req, a.iPGeolocationHTTPHeaderField)
+		if err == nil {
+			return country, nil
+		}
+
+		if a.logAPIRequests {
+			infoLogger.Print("Failed to read country from HTTP header field [",
+				a.iPGeolocationHTTPHeaderField,
+				"], continuing with API lookup.")
+		}
+	}
+
+	country, err := a.callGeoJS(ipAddressString)
+	if err != nil {
+		if !(os.IsTimeout(err) || a.ignoreAPITimeout) {
+			infoLogger.Println(err)
+		}
+		return "", err
+	}
+
+	return country, nil
 }
 
 func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
@@ -351,11 +381,21 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 
 	// this could possible cause a DoS attack
 	if len([]rune(countryCode)) != countryCodeLength {
-		return "", fmt.Errorf("API response has more than 2 characters")
+		return "", fmt.Errorf("API response has more or less than 2 characters")
 	}
 
 	if a.logAPIRequests {
 		infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiURI)
+	}
+
+	return countryCode, nil
+}
+
+func (a *GeoBlock) readIpGeolocationHttpHeader(req *http.Request, name string) (string, error) {
+	countryCode := req.Header.Get(name)
+
+	if len([]rune(countryCode)) != countryCodeLength {
+		return "", fmt.Errorf("API response has more or less than 2 characters")
 	}
 
 	return countryCode, nil

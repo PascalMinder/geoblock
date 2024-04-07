@@ -468,6 +468,10 @@ Timeout for the call to the api uri.
 
 If the `ignoreAPITimeout` option is set to `true`, a request is allowed even if the API could not be reached.
 
+### Set custom HTTP header field to retrieve the country code from `ipGeolocationHttpHeaderField`
+
+Allow setting the name of a custom HTTP header field to retrieve the country code from. E.g. `cf-ipcountry` for Cloudflare.
+
 ### Cache size `cacheSize`
 
 Defines the max size of the [LRU](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) (least recently used) cache.
