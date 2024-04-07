@@ -9,21 +9,19 @@ on:
   pull_request:
 
 jobs:
-
   main:
     name: Main Process
     runs-on: ubuntu-latest
     env:
-      GO_VERSION: 1.15
-      GOLANGCI_LINT_VERSION: v1.33.0
-      YAEGI_VERSION: v0.9.8
+      GO_VERSION: 1.19
+      GOLANGCI_LINT_VERSION: v1.50.0
+      YAEGI_VERSION: v0.14.2
       CGO_ENABLED: 0
     defaults:
       run:
         working-directory: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}
 
     steps:
-
       # https://github.com/marketplace/actions/setup-go-environment
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v2
@@ -39,7 +37,7 @@ jobs:
 
       # https://github.com/marketplace/actions/cache
       - name: Cache Go modules
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ${{ github.workspace }}/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
