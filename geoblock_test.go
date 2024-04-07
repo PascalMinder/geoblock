@@ -20,7 +20,7 @@ const (
 	invalidIP                    = "192.168.1.X"
 	unknownCountry               = "1.1.1.1"
 	apiURI                       = "https://get.geojs.io/v1/ip/country/{ip}"
-	ipGeolocationHttpHeaderField = "cf-ipcountry"
+	ipGeolocationHTTPHeaderField = "cf-ipcountry"
 )
 
 func TestEmptyApi(t *testing.T) {
@@ -35,7 +35,7 @@ func TestEmptyApi(t *testing.T) {
 
 	// expect error
 	if err == nil {
-		t.Fatal("Empty API uri accepted")
+		t.Fatal("empty API uri accepted")
 	}
 }
 
@@ -51,7 +51,7 @@ func TestMissingIpInApi(t *testing.T) {
 
 	// expect error
 	if err == nil {
-		t.Fatal("Missing IP block in API uri")
+		t.Fatal("missing IP block in API uri")
 	}
 }
 
@@ -65,7 +65,37 @@ func TestEmptyAllowedCountryList(t *testing.T) {
 
 	// expect error
 	if err == nil {
-		t.Fatal("Empty country list is not allowed")
+		t.Fatal("empty country list is not allowed")
+	}
+}
+
+func TestEmptyDeniedRequestStatusCode(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+
+	if err != nil {
+		t.Fatal("no error expected for empty denied request status code")
+	}
+}
+
+func TestInvalidDeniedRequestStatusCode(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.HTTPStatusCodeDeniedRequest = 1
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+
+	// expect error
+	if err == nil {
+		t.Fatal("invalid denied request status code supplied")
 	}
 }
 
@@ -227,6 +257,33 @@ func TestDeniedCountry(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestCustomDeniedRequestStatusCode(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.HTTPStatusCodeDeniedRequest = 418
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusTeapot)
 }
 
 func TestAllowBlacklistMode(t *testing.T) {
@@ -663,7 +720,7 @@ func TestIpGeolocationHttpField(t *testing.T) {
 	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CA")
 	cfg.AddCountryHeader = true
-	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHttpHeaderField
+	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHTTPHeaderField
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -681,7 +738,7 @@ func TestIpGeolocationHttpField(t *testing.T) {
 	}
 
 	req.Header.Add(xForwardedFor, caExampleIP)
-	req.Header.Add(ipGeolocationHttpHeaderField, "CA")
+	req.Header.Add(ipGeolocationHTTPHeaderField, "CA")
 
 	handler.ServeHTTP(recorder, req)
 
@@ -698,7 +755,7 @@ func TestIpGeolocationHttpFieldContentInvalid(t *testing.T) {
 	cfg := createTesterConfig()
 	cfg.API = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CA")
-	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHttpHeaderField
+	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHTTPHeaderField
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
@@ -716,7 +773,7 @@ func TestIpGeolocationHttpFieldContentInvalid(t *testing.T) {
 	}
 
 	req.Header.Add(xForwardedFor, caExampleIP)
-	req.Header.Add(ipGeolocationHttpHeaderField, "")
+	req.Header.Add(ipGeolocationHTTPHeaderField, "")
 
 	handler.ServeHTTP(recorder, req)
 
@@ -745,7 +802,11 @@ type CountryCodeHandler struct {
 
 func (h *CountryCodeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(h.ResponseCountryCode))
+
+	_, err := w.Write([]byte(h.ResponseCountryCode))
+	if err != nil {
+		fmt.Println("Error on write")
+	}
 }
 
 func apiHandlerInvalid(w http.ResponseWriter, r *http.Request) {
@@ -753,11 +814,15 @@ func apiHandlerInvalid(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiTimeout(w http.ResponseWriter, r *http.Request) {
-	var result = ``
 	// Add waiting time for response
 	time.Sleep(20 * time.Millisecond)
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(result))
+
+	_, err := w.Write([]byte(""))
+	if err != nil {
+		fmt.Println("Error on write")
+	}
 }
 
 func createTesterConfig() *geoblock.Config {

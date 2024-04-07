@@ -510,3 +510,7 @@ allowedIPAddresses:
 ### Add Header to request with Country Code: `addCountryHeader`
 
 If set to `true`, adds the X-IPCountry header to the HTTP request header. The header contains the two letter country code returned by cache or API request.
+
+### Customize denied request status code `httpStatusCodeDeniedRequest`
+
+Allows customizing the HTTP status code returned if the request was denied.
