@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	xForwardedFor        = "X-Forwarded-For"
-	xRealIP              = "X-Real-IP"
-	countryHeader        = "X-IPCountry"
-	numberOfHoursInMonth = 30 * 24
-	unknownCountryCode   = "AA"
-	countryCodeLength    = 2
+	xForwardedFor                      = "X-Forwarded-For"
+	xRealIP                            = "X-Real-IP"
+	countryHeader                      = "X-IPCountry"
+	numberOfHoursInMonth               = 30 * 24
+	unknownCountryCode                 = "AA"
+	countryCodeLength                  = 2
+	defaultDeniedRequestHTTPStatusCode = 403
 )
 
 var (
@@ -47,6 +48,7 @@ type Config struct {
 	Countries                    []string `yaml:"countries,omitempty"`
 	AllowedIPAddresses           []string `yaml:"allowedIPAddresses,omitempty"`
 	AddCountryHeader             bool     `yaml:"addCountryHeader"`
+	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
 }
 
 type ipEntry struct {
@@ -80,6 +82,7 @@ type GeoBlock struct {
 	allowedIPRanges              []*net.IPNet
 	privateIPRanges              []*net.IPNet
 	addCountryHeader             bool
+	httpStatusCodeDeniedRequest  int
 	database                     *lru.LRUCache
 	name                         string
 }
@@ -96,6 +99,15 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 
 	if config.APITimeoutMs == 0 {
 		config.APITimeoutMs = 750
+	}
+
+	if config.HTTPStatusCodeDeniedRequest != 0 {
+		// check if given status code is valid
+		if len(http.StatusText(config.HTTPStatusCodeDeniedRequest)) == 0 {
+			return nil, fmt.Errorf("invalid denied request status code supplied")
+		}
+	} else {
+		config.HTTPStatusCodeDeniedRequest = defaultDeniedRequestHTTPStatusCode
 	}
 
 	var allowedIPAddresses []net.IP
@@ -137,6 +149,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		infoLogger.Printf("blacklist mode: %t", config.BlackListMode)
 		infoLogger.Printf("add country header: %t", config.AddCountryHeader)
 		infoLogger.Printf("countries: %v", config.Countries)
+		infoLogger.Printf("Denied request status code: %d", config.HTTPStatusCodeDeniedRequest)
 	}
 
 	cache, err := lru.NewLRUCache(config.CacheSize)
@@ -165,6 +178,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		privateIPRanges:              initPrivateIPBlocks(),
 		database:                     cache,
 		addCountryHeader:             config.AddCountryHeader,
+		httpStatusCodeDeniedRequest:  config.HTTPStatusCodeDeniedRequest,
 		name:                         name,
 	}, nil
 }
@@ -193,7 +207,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				if a.logLocalRequests {
 					infoLogger.Println("Local ip denied: ", ipAddress)
 				}
-				rw.WriteHeader(http.StatusForbidden)
+				rw.WriteHeader(a.httpStatusCodeDeniedRequest)
 			}
 
 			return
@@ -223,7 +237,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			entry, err = a.createNewIPEntry(req, ipAddressString)
 
 			if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
-				rw.WriteHeader(http.StatusForbidden)
+				rw.WriteHeader(a.httpStatusCodeDeniedRequest)
 				return
 			} else if os.IsTimeout(err) && a.ignoreAPITimeout {
 				infoLogger.Printf("%s: request allowed [%s] due to API timeout!", a.name, ipAddress)
@@ -242,7 +256,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				entry, err = a.createNewIPEntry(req, ipAddressString)
 
 				if err != nil {
-					rw.WriteHeader(http.StatusForbidden)
+					rw.WriteHeader(a.httpStatusCodeDeniedRequest)
 					return
 				}
 			}
@@ -253,7 +267,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 		if !isAllowed {
 			infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
-			rw.WriteHeader(http.StatusForbidden)
+			rw.WriteHeader(a.httpStatusCodeDeniedRequest)
 
 			return
 		} else if a.logAllowedRequests {
@@ -322,7 +336,7 @@ func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (
 
 func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (string, error) {
 	if len(a.iPGeolocationHTTPHeaderField) != 0 {
-		country, err := a.readIpGeolocationHttpHeader(req, a.iPGeolocationHTTPHeaderField)
+		country, err := a.readIPGeolocationHTTPHeader(req, a.iPGeolocationHTTPHeaderField)
 		if err == nil {
 			return country, nil
 		}
@@ -391,7 +405,7 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	return countryCode, nil
 }
 
-func (a *GeoBlock) readIpGeolocationHttpHeader(req *http.Request, name string) (string, error) {
+func (a *GeoBlock) readIPGeolocationHTTPHeader(req *http.Request, name string) (string, error) {
 	countryCode := req.Header.Get(name)
 
 	if len([]rune(countryCode)) != countryCodeLength {
