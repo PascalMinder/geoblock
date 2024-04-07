@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	xForwardedFor  = "X-Forwarded-For"
-	CountryHeader  = "X-IPCountry"
-	caExampleIP    = "99.220.109.148"
-	chExampleIP    = "82.220.110.18"
-	privateRangeIP = "192.168.1.1"
-	invalidIP      = "192.168.1.X"
-	unknownCountry = "1.1.1.1"
-	apiURI         = "https://get.geojs.io/v1/ip/country/{ip}"
+	xForwardedFor                = "X-Forwarded-For"
+	CountryHeader                = "X-IPCountry"
+	caExampleIP                  = "99.220.109.148"
+	chExampleIP                  = "82.220.110.18"
+	privateRangeIP               = "192.168.1.1"
+	invalidIP                    = "192.168.1.X"
+	unknownCountry               = "1.1.1.1"
+	apiURI                       = "https://get.geojs.io/v1/ip/country/{ip}"
+	ipGeolocationHttpHeaderField = "cf-ipcountry"
 )
 
 func TestEmptyApi(t *testing.T) {
@@ -658,6 +659,70 @@ func TestCountryHeader(t *testing.T) {
 	assertHeader(t, req, CountryHeader, "CA")
 }
 
+func TestIpGeolocationHttpField(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.AddCountryHeader = true
+	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHttpHeaderField
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+	req.Header.Add(ipGeolocationHttpHeaderField, "CA")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertHeader(t, req, CountryHeader, "CA")
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestIpGeolocationHttpFieldContentInvalid(t *testing.T) {
+	apiHandler := &CountryCodeHandler{ResponseCountryCode: "CA"}
+
+	// set up our fake api server
+	var apiStub = httptest.NewServer(apiHandler)
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHttpHeaderField
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+	req.Header.Add(ipGeolocationHttpHeaderField, "")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
@@ -672,6 +737,15 @@ func assertHeader(t *testing.T, req *http.Request, key string, expected string) 
 	if received := req.Header.Get(key); received != expected {
 		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
 	}
+}
+
+type CountryCodeHandler struct {
+	ResponseCountryCode string
+}
+
+func (h *CountryCodeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(h.ResponseCountryCode))
 }
 
 func apiHandlerInvalid(w http.ResponseWriter, r *http.Request) {
