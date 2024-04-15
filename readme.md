@@ -84,7 +84,7 @@ Add the following to your `traefik-config.yml`
 ```yml
 experimental:
   plugins:
-    GeoBlock:
+    geoblock:
       moduleName: "github.com/PascalMinder/geoblock"
       version: "v0.2.5"
 
@@ -110,7 +110,7 @@ http:
   middlewares:
     my-GeoBlock:
       plugin:
-        GeoBlock:
+        geoblock:
           silentStartUp: false
           allowLocalRequests: true
           logLocalRequests: false
