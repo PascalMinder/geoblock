@@ -49,6 +49,7 @@ type Config struct {
 	AllowedIPAddresses           []string `yaml:"allowedIPAddresses,omitempty"`
 	AddCountryHeader             bool     `yaml:"addCountryHeader"`
 	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
+	LogFilePath                  string   `yaml:"logFilePath"`
 }
 
 type ipEntry struct {
@@ -84,74 +85,44 @@ type GeoBlock struct {
 	addCountryHeader             bool
 	httpStatusCodeDeniedRequest  int
 	database                     *lru.LRUCache
+	logFile                      *os.File
 	name                         string
 }
 
 // New created a new GeoBlock plugin.
 func New(_ context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	// check geolocation API uri
 	if len(config.API) == 0 || !strings.Contains(config.API, "{ip}") {
 		return nil, fmt.Errorf("no api uri given")
 	}
 
+	// check if at least one allowed country is provided
 	if len(config.Countries) == 0 {
 		return nil, fmt.Errorf("no allowed country code provided")
 	}
 
+	// set default API timeout if non is given
 	if config.APITimeoutMs == 0 {
 		config.APITimeoutMs = 750
 	}
 
-	if config.HTTPStatusCodeDeniedRequest != 0 {
-		// check if given status code is valid
-		if len(http.StatusText(config.HTTPStatusCodeDeniedRequest)) == 0 {
-			return nil, fmt.Errorf("invalid denied request status code supplied")
-		}
-	} else {
-		config.HTTPStatusCodeDeniedRequest = defaultDeniedRequestHTTPStatusCode
+	// set default HTTP status code for denied requests if non other is supplied
+	deniedRequestHttpStatusCode, err := getHttpStatusCodeDeniedRequest(config.HTTPStatusCodeDeniedRequest)
+	if err != nil {
+		return nil, err
 	}
 
-	var allowedIPAddresses []net.IP
-	var allowedIPRanges []*net.IPNet
-	for _, ipAddressEntry := range config.AllowedIPAddresses {
-		ip, ipBlock, err := net.ParseCIDR(ipAddressEntry)
-		if err == nil {
-			allowedIPAddresses = append(allowedIPAddresses, ip)
-			allowedIPRanges = append(allowedIPRanges, ipBlock)
-			continue
-		}
-
-		ipAddress := net.ParseIP(ipAddressEntry)
-		if ipAddress == nil {
-			infoLogger.Fatal("Invalid ip address given!")
-		}
-		allowedIPAddresses = append(allowedIPAddresses, ipAddress)
-	}
+	// build allowed IP and IP ranges lists
+	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
 
 	infoLogger.SetOutput(os.Stdout)
 
+	// output configuration of the middleware instance
 	if !config.SilentStartUp {
-		infoLogger.Printf("allow local IPs: %t", config.AllowLocalRequests)
-		infoLogger.Printf("log local requests: %t", config.LogLocalRequests)
-		infoLogger.Printf("log allowed requests: %t", config.LogAllowedRequests)
-		infoLogger.Printf("log api requests: %t", config.LogAPIRequests)
-		if len(config.IPGeolocationHTTPHeaderField) == 0 {
-			infoLogger.Printf("use custom HTTP header field for country lookup: %t", false)
-		} else {
-			infoLogger.Printf("use custom HTTP header field for country lookup: %t [%s]", true, config.IPGeolocationHTTPHeaderField)
-		}
-		infoLogger.Printf("API uri: %s", config.API)
-		infoLogger.Printf("API timeout: %d", config.APITimeoutMs)
-		infoLogger.Printf("ignore API timeout: %t", config.IgnoreAPITimeout)
-		infoLogger.Printf("cache size: %d", config.CacheSize)
-		infoLogger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
-		infoLogger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
-		infoLogger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
-		infoLogger.Printf("blacklist mode: %t", config.BlackListMode)
-		infoLogger.Printf("add country header: %t", config.AddCountryHeader)
-		infoLogger.Printf("countries: %v", config.Countries)
-		infoLogger.Printf("Denied request status code: %d", config.HTTPStatusCodeDeniedRequest)
+		printConfiguration(config, infoLogger)
 	}
 
+	// create LRU cache for IP lookup
 	cache, err := lru.NewLRUCache(config.CacheSize)
 	if err != nil {
 		infoLogger.Fatal(err)
@@ -178,7 +149,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		privateIPRanges:              initPrivateIPBlocks(),
 		database:                     cache,
 		addCountryHeader:             config.AddCountryHeader,
-		httpStatusCodeDeniedRequest:  config.HTTPStatusCodeDeniedRequest,
+		httpStatusCodeDeniedRequest:  deniedRequestHttpStatusCode,
 		name:                         name,
 	}, nil
 }
@@ -480,4 +451,65 @@ func isPrivateIP(ip net.IP, privateIPBlocks []*net.IPNet) bool {
 	}
 
 	return false
+}
+
+func getHttpStatusCodeDeniedRequest(code int) (int, error) {
+	if code != 0 {
+		// check if given status code is valid
+		if len(http.StatusText(code)) == 0 {
+			return 0, fmt.Errorf("invalid denied request status code supplied")
+		}
+
+		return code, nil
+	}
+
+	return defaultDeniedRequestHTTPStatusCode, nil
+}
+
+func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []*net.IPNet) {
+	var allowedIPAddresses []net.IP
+	var allowedIPRanges []*net.IPNet
+
+	for _, ipAddressEntry := range entries {
+		// Attempt to parse as CIDR
+		ip, ipBlock, err := net.ParseCIDR(ipAddressEntry)
+		if err == nil {
+			allowedIPAddresses = append(allowedIPAddresses, ip)
+			allowedIPRanges = append(allowedIPRanges, ipBlock)
+			continue
+		}
+
+		// Attempt to parse as a single IP address
+		ipAddress := net.ParseIP(ipAddressEntry)
+		if ipAddress == nil {
+			logger.Fatal("Invalid IP address provided:", ipAddressEntry)
+		}
+		allowedIPAddresses = append(allowedIPAddresses, ipAddress)
+	}
+
+	return allowedIPAddresses, allowedIPRanges
+}
+
+func printConfiguration(config *Config, logger *log.Logger) {
+	logger.Printf("allow local IPs: %t", config.AllowLocalRequests)
+	logger.Printf("log local requests: %t", config.LogLocalRequests)
+	logger.Printf("log allowed requests: %t", config.LogAllowedRequests)
+	logger.Printf("log api requests: %t", config.LogAPIRequests)
+	if len(config.IPGeolocationHTTPHeaderField) == 0 {
+		logger.Printf("use custom HTTP header field for country lookup: %t", false)
+	} else {
+		logger.Printf("use custom HTTP header field for country lookup: %t [%s]", true, config.IPGeolocationHTTPHeaderField)
+	}
+	logger.Printf("API uri: %s", config.API)
+	logger.Printf("API timeout: %d", config.APITimeoutMs)
+	logger.Printf("ignore API timeout: %t", config.IgnoreAPITimeout)
+	logger.Printf("cache size: %d", config.CacheSize)
+	logger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
+	logger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
+	logger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
+	logger.Printf("blacklist mode: %t", config.BlackListMode)
+	logger.Printf("add country header: %t", config.AddCountryHeader)
+	logger.Printf("countries: %v", config.Countries)
+	logger.Printf("Denied request status code: %d", config.HTTPStatusCodeDeniedRequest)
+	logger.Printf("Log file path: %s", config.LogFilePath)
 }
