@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -90,7 +91,7 @@ type GeoBlock struct {
 }
 
 // New created a new GeoBlock plugin.
-func New(_ context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	// check geolocation API uri
 	if len(config.API) == 0 || !strings.Contains(config.API, "{ip}") {
 		return nil, fmt.Errorf("no api uri given")
@@ -128,6 +129,22 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		infoLogger.Fatal(err)
 	}
 
+	// create custom log target if needed
+	logFile, err := initializeLogFile(config.LogFilePath, infoLogger)
+	if err != nil {
+		infoLogger.Printf("Error initializing log file: %v\n", err)
+	}
+
+	// Set up a goroutine to close the file when the context is done
+	if logFile != nil {
+		go func(logger *log.Logger) {
+			<-ctx.Done() // Wait for context cancellation
+			logger.SetOutput(os.Stdout)
+			logFile.Close()
+			logger.Printf("Log file closed for middleware: %s\n", name)
+		}(infoLogger)
+	}
+
 	return &GeoBlock{
 		next:                         next,
 		silentStartUp:                config.SilentStartUp,
@@ -150,6 +167,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		database:                     cache,
 		addCountryHeader:             config.AddCountryHeader,
 		httpStatusCodeDeniedRequest:  deniedRequestHttpStatusCode,
+		logFile:                      logFile,
 		name:                         name,
 	}, nil
 }
@@ -512,4 +530,45 @@ func printConfiguration(config *Config, logger *log.Logger) {
 	logger.Printf("countries: %v", config.Countries)
 	logger.Printf("Denied request status code: %d", config.HTTPStatusCodeDeniedRequest)
 	logger.Printf("Log file path: %s", config.LogFilePath)
+}
+
+func initializeLogFile(logFilePath string, logger *log.Logger) (*os.File, error) {
+	if len(logFilePath) == 0 {
+		return nil, nil
+	}
+
+	writable, err := isFolder(logFilePath)
+	if err != nil {
+		logger.Println(err)
+		return nil, err
+	} else if !writable {
+		logger.Println("Specified log folder is not writable")
+		return nil, fmt.Errorf("folder is not writable: %s", logFilePath)
+	}
+
+	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		logger.Printf("Failed to open log file: %v\n", err)
+		return nil, err
+	}
+
+	logger.SetOutput(logFile)
+	return logFile, nil
+}
+
+func isFolder(filePath string) (bool, error) {
+	dirPath := filepath.Dir(filePath)
+	info, err := os.Stat(dirPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, fmt.Errorf("path does not exist")
+		}
+		return false, fmt.Errorf("error checking path: %w", err)
+	}
+
+	if !info.IsDir() {
+		return false, fmt.Errorf("folder does not exist")
+	}
+
+	return true, nil
 }

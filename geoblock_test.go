@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -747,6 +748,56 @@ func TestIpGeolocationHttpField(t *testing.T) {
 }
 
 func TestIpGeolocationHttpFieldContentInvalid(t *testing.T) {
+	apiHandler := &CountryCodeHandler{ResponseCountryCode: "CA"}
+
+	// set up our fake api server
+	var apiStub = httptest.NewServer(apiHandler)
+
+	tempDir, err := os.MkdirTemp("", "logtest")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHTTPHeaderField
+	cfg.LogFilePath = tempDir + "/info.log"
+	cfg.LogAllowedRequests = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+
+	content, err := os.ReadFile(cfg.LogFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	if len(content) == 0 {
+		t.Fatalf("Empty custom log file.")
+	}
+}
+
+func TestCustomLogFile(t *testing.T) {
 	apiHandler := &CountryCodeHandler{ResponseCountryCode: "CA"}
 
 	// set up our fake api server
