@@ -514,3 +514,7 @@ If set to `true`, adds the X-IPCountry header to the HTTP request header. The he
 ### Customize denied request status code `httpStatusCodeDeniedRequest`
 
 Allows customizing the HTTP status code returned if the request was denied.
+
+### Define a custom log file `logFilePath`
+
+Allows to define a target for the logs of the middleware. The path must look like the following: `logFilePath: "/log/geoblock.log"`. Make sure the folder is writeable.
