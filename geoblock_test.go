@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,11 +146,67 @@ func TestMultipleAllowedCountry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, chExampleIP)
+	req.Header.Add(xForwardedFor, caExampleIP)
 
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+// TODO: test multiple IP addresses in the header, maybee switch the order to test if the same behaviour?
+
+func TestMultipleIpAddresses(t *testing.T) {
+	cfg := createTesterConfig()
+
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, strings.Join([]string{chExampleIP, caExampleIP}, ","))
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestMultipleIpAddressesReverse(t *testing.T) {
+	cfg := createTesterConfig()
+
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, strings.Join([]string{caExampleIP, chExampleIP}, ","))
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
 func TestAllowedUnknownCountry(t *testing.T) {
@@ -738,7 +795,9 @@ func TestIpGeolocationHttpField(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req.Header.Add(xForwardedFor, caExampleIP)
+	// we only want to listen to the ipGeolocationHTTPHeader field,
+	// therefore we just give another countries IP address to test it.
+	req.Header.Add(xForwardedFor, chExampleIP)
 	req.Header.Add(ipGeolocationHTTPHeaderField, "CA")
 
 	handler.ServeHTTP(recorder, req)

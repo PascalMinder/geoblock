@@ -112,6 +112,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	if err != nil {
 		return nil, err
 	}
+	config.HTTPStatusCodeDeniedRequest = deniedRequestHttpStatusCode
 
 	// build allowed IP and IP ranges lists
 	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
@@ -166,14 +167,14 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		privateIPRanges:              initPrivateIPBlocks(),
 		database:                     cache,
 		addCountryHeader:             config.AddCountryHeader,
-		httpStatusCodeDeniedRequest:  deniedRequestHttpStatusCode,
+		httpStatusCodeDeniedRequest:  config.HTTPStatusCodeDeniedRequest,
 		logFile:                      logFile,
 		name:                         name,
 	}, nil
 }
 
 func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	reqIPAddr, err := a.collectRemoteIP(req)
+	requestIPAddresses, err := a.collectRemoteIP(req)
 	if err != nil {
 		// if one of the ip addresses could not be parsed, return status forbidden
 		infoLogger.Println(err)
@@ -181,94 +182,106 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	for _, ipAddress := range reqIPAddr {
-		var entry ipEntry
-		ipAddressString := ipAddress.String()
-		privateIP := isPrivateIP(*ipAddress, a.privateIPRanges)
-
-		if privateIP {
-			if a.allowLocalRequests {
-				if a.logLocalRequests {
-					infoLogger.Println("Local ip allowed: ", ipAddress)
-				}
-				a.next.ServeHTTP(rw, req)
-			} else {
-				if a.logLocalRequests {
-					infoLogger.Println("Local ip denied: ", ipAddress)
-				}
-				rw.WriteHeader(a.httpStatusCodeDeniedRequest)
-			}
-
-			return
-		}
-
-		if ipInSlice(*ipAddress, a.allowedIPAddresses) {
-			if a.logLocalRequests {
-				infoLogger.Println("Allow explicitly allowed ip: ", ipAddress)
-			}
-			a.next.ServeHTTP(rw, req)
-			return
-		}
-
-		for _, ipRange := range a.allowedIPRanges {
-			if ipRange.Contains(*ipAddress) {
-				if a.logLocalRequests {
-					infoLogger.Println("Allow explicitly allowed ip: ", ipAddress)
-				}
-				a.next.ServeHTTP(rw, req)
-				return
-			}
-		}
-
-		cacheEntry, ok := a.database.Get(ipAddressString)
-
-		if !ok {
-			entry, err = a.createNewIPEntry(req, ipAddressString)
-
-			if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
-				rw.WriteHeader(a.httpStatusCodeDeniedRequest)
-				return
-			} else if os.IsTimeout(err) && a.ignoreAPITimeout {
-				infoLogger.Printf("%s: request allowed [%s] due to API timeout!", a.name, ipAddress)
-				a.next.ServeHTTP(rw, req)
-				return
-			}
-		} else {
-			entry = cacheEntry.(ipEntry)
-
-			if a.logAPIRequests {
-				infoLogger.Println("Loaded from database: ", entry)
-			}
-
-			// check if existing entry was made more than a month ago, if so update the entry
-			if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
-				entry, err = a.createNewIPEntry(req, ipAddressString)
-
-				if err != nil {
-					rw.WriteHeader(a.httpStatusCodeDeniedRequest)
-					return
-				}
-			}
-		}
-
-		isAllowed := (stringInSlice(entry.Country, a.countries) != a.blackListMode) ||
-			(entry.Country == unknownCountryCode && a.allowUnknownCountries)
-
-		if !isAllowed {
-			infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, ipAddress, entry.Country)
+	for _, requestIPAddress := range requestIPAddresses {
+		if !a.allowDenyIPAddress(requestIPAddress, req) {
 			rw.WriteHeader(a.httpStatusCodeDeniedRequest)
-
-			return
-		} else if a.logAllowedRequests {
-			infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, ipAddress, entry.Country)
-		}
-
-		if a.addCountryHeader {
-			req.Header.Set(countryHeader, entry.Country)
+			a.next.ServeHTTP(rw, req)
 		}
 	}
 
 	a.next.ServeHTTP(rw, req)
+}
+
+func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) bool {
+	// check if the request IP address is a local address and if those are allowed
+	if isPrivateIP(*requestIPAddr, a.privateIPRanges) {
+		if a.allowLocalRequests {
+			if a.logLocalRequests {
+				infoLogger.Printf("%s: request allowed [%s] since local IP addresses are allowed", a.name, requestIPAddr)
+			}
+			return true
+		} else {
+			if a.logLocalRequests {
+				infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
+			}
+			return false
+		}
+	}
+
+	// check if the request IP address is explicitly allowed
+	if ipInSlice(*requestIPAddr, a.allowedIPAddresses) {
+		if a.logAllowedRequests {
+			infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
+		}
+		return true
+	}
+
+	// check if the request IP address is contained within one of the explicitly allowed IP address ranges
+	for _, ipRange := range a.allowedIPRanges {
+		if ipRange.Contains(*requestIPAddr) {
+			if a.logLocalRequests {
+				infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
+			}
+			return true
+		}
+	}
+
+	// check if the GeoIP database contains an entry for the request IP address
+	allowed, countryCode := a.allowDenyCachedRequestIp(requestIPAddr, req)
+
+	if a.addCountryHeader && len(countryCode) > 0 {
+		req.Header.Set(countryHeader, countryCode)
+	}
+
+	return allowed
+}
+
+func (a *GeoBlock) allowDenyCachedRequestIp(requestIPAddr *net.IP, req *http.Request) (bool, string) {
+	ipAddressString := requestIPAddr.String()
+	cacheEntry, ok := a.database.Get(ipAddressString)
+
+	var entry ipEntry
+	var err error
+	if !ok {
+		entry, err = a.createNewIPEntry(req, ipAddressString)
+		if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
+			return false, ""
+		} else if os.IsTimeout(err) && a.ignoreAPITimeout {
+			infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
+			// TODO: this was previously an immediate response to the client
+			return true, ""
+		}
+	} else {
+		entry = cacheEntry.(ipEntry)
+	}
+
+	if a.logAPIRequests {
+		infoLogger.Println("Loaded from database: ", entry)
+	}
+
+	// check if existing entry was made more than a month ago, if so update the entry
+	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
+		entry, err = a.createNewIPEntry(req, ipAddressString)
+
+		if err != nil {
+			return false, ""
+		}
+	}
+
+	// check if we are in black/white-list mode and allow/deny based on country code
+	isAllowed := (stringInSlice(entry.Country, a.countries) != a.blackListMode) ||
+		(entry.Country == unknownCountryCode && a.allowUnknownCountries)
+
+	if !isAllowed {
+		infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
+		return false, entry.Country
+	}
+
+	if a.logAllowedRequests {
+		infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
+	}
+
+	return true, entry.Country
 }
 
 func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
