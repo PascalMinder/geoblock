@@ -41,6 +41,7 @@ type Config struct {
 	APITimeoutMs                 int      `yaml:"apiTimeoutMs"`
 	IgnoreAPITimeout             bool     `yaml:"ignoreApiTimeout"`
 	IPGeolocationHTTPHeaderField string   `yaml:"ipGeolocationHttpHeaderField"`
+	XForwardedForReverseProxy    bool     `yaml:"xForwardedForReverseProxy"`
 	CacheSize                    int      `yaml:"cacheSize"`
 	ForceMonthlyUpdate           bool     `yaml:"forceMonthlyUpdate"`
 	AllowUnknownCountries        bool     `yaml:"allowUnknownCountries"`
@@ -75,6 +76,7 @@ type GeoBlock struct {
 	apiTimeoutMs                 int
 	ignoreAPITimeout             bool
 	iPGeolocationHTTPHeaderField string
+	xForwardedForReverseProxy    bool
 	forceMonthlyUpdate           bool
 	allowUnknownCountries        bool
 	unknownCountryCode           string
@@ -157,6 +159,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		apiTimeoutMs:                 config.APITimeoutMs,
 		ignoreAPITimeout:             config.IgnoreAPITimeout,
 		iPGeolocationHTTPHeaderField: config.IPGeolocationHTTPHeaderField,
+		xForwardedForReverseProxy:    config.XForwardedForReverseProxy,
 		forceMonthlyUpdate:           config.ForceMonthlyUpdate,
 		allowUnknownCountries:        config.AllowUnknownCountries,
 		unknownCountryCode:           config.UnknownCountryAPIResponse,
@@ -180,6 +183,11 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		infoLogger.Println(err)
 		rw.WriteHeader(http.StatusForbidden)
 		return
+	}
+
+	// only keep the first IP address, which should be the client (if the proxy behaves itself), to check if allowed or denied
+	if a.xForwardedForReverseProxy {
+		requestIPAddresses = requestIPAddresses[:1]
 	}
 
 	for _, requestIPAddress := range requestIPAddresses {
