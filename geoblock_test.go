@@ -31,7 +31,7 @@ func TestEmptyApi(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
@@ -47,7 +47,7 @@ func TestMissingIpInApi(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
@@ -61,7 +61,7 @@ func TestEmptyAllowedCountryList(t *testing.T) {
 	cfg := createTesterConfig()
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
@@ -76,7 +76,7 @@ func TestEmptyDeniedRequestStatusCode(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
@@ -91,7 +91,7 @@ func TestInvalidDeniedRequestStatusCode(t *testing.T) {
 	cfg.HTTPStatusCodeDeniedRequest = 1
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 
@@ -106,7 +106,7 @@ func TestAllowedCountry(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -132,7 +132,7 @@ func TestMultipleAllowedCountry(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH", "CA")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -153,15 +153,36 @@ func TestMultipleAllowedCountry(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
-// TODO: test multiple IP addresses in the header, maybee switch the order to test if the same behaviour?
+func createMockAPIServer(t *testing.T, ipResponseMap map[string][]byte) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		t.Logf("Intercepted request: %s %s", req.Method, req.URL.String())
+		t.Logf("Headers: %v", req.Header)
+
+		requestedIP := req.URL.String()[1:]
+
+		if response, exists := ipResponseMap[requestedIP]; exists {
+			t.Logf("Matched IP: %s", requestedIP)
+			rw.WriteHeader(http.StatusOK)
+			_, _ = rw.Write(response)
+		} else {
+			t.Errorf("Unexpected IP: %s", requestedIP)
+			rw.WriteHeader(http.StatusNotFound)
+			_, _ = rw.Write([]byte(`{"error": "IP not found"}`))
+		}
+	}))
+}
 
 func TestMultipleIpAddresses(t *testing.T) {
+	mockServer := createMockAPIServer(t, map[string][]byte{caExampleIP: []byte(`CA`), chExampleIP: []byte(`CH`)})
+	defer mockServer.Close()
+
 	cfg := createTesterConfig()
 
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = mockServer.URL + "/{ip}"
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -183,12 +204,16 @@ func TestMultipleIpAddresses(t *testing.T) {
 }
 
 func TestMultipleIpAddressesReverse(t *testing.T) {
+	mockServer := createMockAPIServer(t, map[string][]byte{caExampleIP: []byte(`CA`), chExampleIP: []byte(`CH`)})
+	defer mockServer.Close()
+
 	cfg := createTesterConfig()
 
 	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = mockServer.URL + "/{ip}"
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -210,13 +235,17 @@ func TestMultipleIpAddressesReverse(t *testing.T) {
 }
 
 func TestMultipleIpAddressesProxy(t *testing.T) {
+	mockServer := createMockAPIServer(t, map[string][]byte{caExampleIP: []byte(`CA`)})
+	defer mockServer.Close()
+
 	cfg := createTesterConfig()
 
 	cfg.Countries = append(cfg.Countries, "CA")
 	cfg.XForwardedForReverseProxy = true
+	cfg.API = mockServer.URL + "/{ip}"
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -238,13 +267,17 @@ func TestMultipleIpAddressesProxy(t *testing.T) {
 }
 
 func TestMultipleIpAddressesProxyReverse(t *testing.T) {
+	mockServer := createMockAPIServer(t, map[string][]byte{chExampleIP: []byte(`CH`)})
+	defer mockServer.Close()
+
 	cfg := createTesterConfig()
 
 	cfg.Countries = append(cfg.Countries, "CA")
 	cfg.XForwardedForReverseProxy = true
+	cfg.API = mockServer.URL + "/{ip}"
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -272,7 +305,7 @@ func TestAllowedUnknownCountry(t *testing.T) {
 	cfg.AllowUnknownCountries = true
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -298,7 +331,7 @@ func TestDenyUnknownCountry(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -324,7 +357,7 @@ func TestAllowedCountryCacheLookUp(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -352,7 +385,7 @@ func TestDeniedCountry(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -379,7 +412,7 @@ func TestCustomDeniedRequestStatusCode(t *testing.T) {
 	cfg.HTTPStatusCodeDeniedRequest = 418
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -406,7 +439,7 @@ func TestAllowBlacklistMode(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -433,7 +466,7 @@ func TestDenyBlacklistMode(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -460,7 +493,7 @@ func TestAllowLocalIP(t *testing.T) {
 	cfg.AllowLocalRequests = true
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -486,7 +519,7 @@ func TestPrivateIPRange(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -512,7 +545,7 @@ func TestInvalidIp(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -543,7 +576,7 @@ func TestInvalidApiResponse(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -578,7 +611,7 @@ func TestApiResponseTimeoutAllowed(t *testing.T) {
 	cfg.IgnoreAPITimeout = true
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -613,7 +646,7 @@ func TestApiResponseTimeoutNotAllowed(t *testing.T) {
 	cfg.IgnoreAPITimeout = false
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -643,7 +676,7 @@ func TestExplicitlyAllowedIP(t *testing.T) {
 	cfg.LogLocalRequests = true
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -670,7 +703,7 @@ func TestExplicitlyAllowedIPNoMatch(t *testing.T) {
 	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, caExampleIP)
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -698,7 +731,7 @@ func TestExplicitlyAllowedIPRangeIPV6(t *testing.T) {
 	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -726,7 +759,7 @@ func TestExplicitlyAllowedIPRangeIPV6NoMatch(t *testing.T) {
 	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -754,7 +787,7 @@ func TestExplicitlyAllowedIPRangeIPV4(t *testing.T) {
 	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -782,7 +815,7 @@ func TestExplicitlyAllowedIPRangeIPV4NoMatch(t *testing.T) {
 	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "8.8.8.8")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -809,7 +842,7 @@ func TestCountryHeader(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CA")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -837,7 +870,7 @@ func TestIpGeolocationHttpField(t *testing.T) {
 	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHTTPHeaderField
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -882,7 +915,7 @@ func TestIpGeolocationHttpFieldContentInvalid(t *testing.T) {
 	cfg.LogAllowedRequests = true
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -924,7 +957,7 @@ func TestCustomLogFile(t *testing.T) {
 	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHTTPHeaderField
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -966,7 +999,7 @@ type CountryCodeHandler struct {
 	ResponseCountryCode string
 }
 
-func (h *CountryCodeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *CountryCodeHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	_, err := w.Write([]byte(h.ResponseCountryCode))
@@ -975,11 +1008,11 @@ func (h *CountryCodeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func apiHandlerInvalid(w http.ResponseWriter, r *http.Request) {
+func apiHandlerInvalid(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "Invalid Response")
 }
 
-func apiTimeout(w http.ResponseWriter, r *http.Request) {
+func apiTimeout(w http.ResponseWriter, _ *http.Request) {
 	// Add waiting time for response
 	time.Sleep(20 * time.Millisecond)
 

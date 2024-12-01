@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -24,6 +25,7 @@ const (
 	unknownCountryCode                 = "AA"
 	countryCodeLength                  = 2
 	defaultDeniedRequestHTTPStatusCode = 403
+	filePermissions                    = fs.FileMode(0666)
 )
 
 var (
@@ -110,11 +112,11 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	// set default HTTP status code for denied requests if non other is supplied
-	deniedRequestHttpStatusCode, err := getHttpStatusCodeDeniedRequest(config.HTTPStatusCodeDeniedRequest)
+	deniedRequestHTTPStatusCode, err := getHTTPStatusCodeDeniedRequest(config.HTTPStatusCodeDeniedRequest)
 	if err != nil {
 		return nil, err
 	}
-	config.HTTPStatusCodeDeniedRequest = deniedRequestHttpStatusCode
+	config.HTTPStatusCodeDeniedRequest = deniedRequestHTTPStatusCode
 
 	// build allowed IP and IP ranges lists
 	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
@@ -208,12 +210,12 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 				infoLogger.Printf("%s: request allowed [%s] since local IP addresses are allowed", a.name, requestIPAddr)
 			}
 			return true
-		} else {
-			if a.logLocalRequests {
-				infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
-			}
-			return false
 		}
+
+		if a.logLocalRequests {
+			infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
+		}
+		return false
 	}
 
 	// check if the request IP address is explicitly allowed
@@ -235,7 +237,7 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	}
 
 	// check if the GeoIP database contains an entry for the request IP address
-	allowed, countryCode := a.allowDenyCachedRequestIp(requestIPAddr, req)
+	allowed, countryCode := a.allowDenyCachedRequestIP(requestIPAddr, req)
 
 	if a.addCountryHeader && len(countryCode) > 0 {
 		req.Header.Set(countryHeader, countryCode)
@@ -244,7 +246,7 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	return allowed
 }
 
-func (a *GeoBlock) allowDenyCachedRequestIp(requestIPAddr *net.IP, req *http.Request) (bool, string) {
+func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bool, string) {
 	ipAddressString := requestIPAddr.String()
 	cacheEntry, ok := a.database.Get(ipAddressString)
 
@@ -492,7 +494,7 @@ func isPrivateIP(ip net.IP, privateIPBlocks []*net.IPNet) bool {
 	return false
 }
 
-func getHttpStatusCodeDeniedRequest(code int) (int, error) {
+func getHTTPStatusCodeDeniedRequest(code int) (int, error) {
 	if code != 0 {
 		// check if given status code is valid
 		if len(http.StatusText(code)) == 0 {
@@ -567,7 +569,7 @@ func initializeLogFile(logFilePath string, logger *log.Logger) (*os.File, error)
 		return nil, fmt.Errorf("folder is not writable: %s", logFilePath)
 	}
 
-	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, filePermissions)
 	if err != nil {
 		logger.Printf("Failed to open log file: %v\n", err)
 		return nil, err
