@@ -209,6 +209,62 @@ func TestMultipleIpAddressesReverse(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestMultipleIpAddressesProxy(t *testing.T) {
+	cfg := createTesterConfig()
+
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.XForwardedForReverseProxy = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, strings.Join([]string{caExampleIP, chExampleIP}, ","))
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestMultipleIpAddressesProxyReverse(t *testing.T) {
+	cfg := createTesterConfig()
+
+	cfg.Countries = append(cfg.Countries, "CA")
+	cfg.XForwardedForReverseProxy = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, strings.Join([]string{chExampleIP, caExampleIP}, ","))
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
 func TestAllowedUnknownCountry(t *testing.T) {
 	cfg := createTesterConfig()
 
