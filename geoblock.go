@@ -54,6 +54,7 @@ type Config struct {
 	AddCountryHeader             bool     `yaml:"addCountryHeader"`
 	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
 	LogFilePath                  string   `yaml:"logFilePath"`
+	RedirectURLIfDenied          string   `yaml:"redirectUrlIfDenied"`
 }
 
 type ipEntry struct {
@@ -91,6 +92,7 @@ type GeoBlock struct {
 	httpStatusCodeDeniedRequest  int
 	database                     *lru.LRUCache
 	logFile                      *os.File
+	redirectURLIfDenied          string
 	name                         string
 }
 
@@ -174,6 +176,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		addCountryHeader:             config.AddCountryHeader,
 		httpStatusCodeDeniedRequest:  config.HTTPStatusCodeDeniedRequest,
 		logFile:                      logFile,
+		redirectURLIfDenied:          config.RedirectURLIfDenied,
 		name:                         name,
 	}, nil
 }
@@ -194,8 +197,14 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	for _, requestIPAddress := range requestIPAddresses {
 		if !a.allowDenyIPAddress(requestIPAddress, req) {
-			rw.WriteHeader(a.httpStatusCodeDeniedRequest)
-			a.next.ServeHTTP(rw, req)
+			if len(a.redirectURLIfDenied) != 0 {
+				rw.Header().Set("Location", a.redirectURLIfDenied)
+				rw.WriteHeader(http.StatusFound)
+				a.next.ServeHTTP(rw, req)
+			} else {
+				rw.WriteHeader(a.httpStatusCodeDeniedRequest)
+				a.next.ServeHTTP(rw, req)
+			}
 		}
 	}
 
@@ -553,6 +562,9 @@ func printConfiguration(config *Config, logger *log.Logger) {
 	logger.Printf("countries: %v", config.Countries)
 	logger.Printf("Denied request status code: %d", config.HTTPStatusCodeDeniedRequest)
 	logger.Printf("Log file path: %s", config.LogFilePath)
+	if len(config.RedirectURLIfDenied) != 0 {
+		logger.Printf("Redirect URL on denied requests: %s", config.RedirectURLIfDenied)
+	}
 }
 
 func initializeLogFile(logFilePath string, logger *log.Logger) (*os.File, error) {
