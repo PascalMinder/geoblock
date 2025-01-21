@@ -406,6 +406,35 @@ func TestDeniedCountry(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestDeniedCountryWithRedirect(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.RedirectURLIfDenied = "https://google.com"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	result := recorder.Result()
+	assertStatusCode(t, result, http.StatusFound)
+	assertResponseHeader(t, result, "Location", cfg.RedirectURLIfDenied)
+}
+
 func TestCustomDeniedRequestStatusCode(t *testing.T) {
 	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
@@ -860,7 +889,7 @@ func TestCountryHeader(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	assertHeader(t, req, CountryHeader, "CA")
+	assertRequestHeader(t, req, CountryHeader, "CA")
 }
 
 func TestIpGeolocationHttpField(t *testing.T) {
@@ -891,7 +920,7 @@ func TestIpGeolocationHttpField(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	assertHeader(t, req, CountryHeader, "CA")
+	assertRequestHeader(t, req, CountryHeader, "CA")
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
@@ -987,10 +1016,18 @@ func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	}
 }
 
-func assertHeader(t *testing.T, req *http.Request, key string, expected string) {
+func assertRequestHeader(t *testing.T, req *http.Request, key string, expected string) {
 	t.Helper()
 
 	if received := req.Header.Get(key); received != expected {
+		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
+	}
+}
+
+func assertResponseHeader(t *testing.T, response *http.Response, key string, expected string) {
+	t.Helper()
+
+	if received := response.Header.Get(key); received != expected {
 		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
 	}
 }

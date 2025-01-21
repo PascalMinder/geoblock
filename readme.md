@@ -518,3 +518,11 @@ Allows customizing the HTTP status code returned if the request was denied.
 ### Define a custom log file `logFilePath`
 
 Allows to define a target for the logs of the middleware. The path must look like the following: `logFilePath: "/log/geoblock.log"`. Make sure the folder is writeable.
+
+### Define a custom log file `XForwardedForReverseProxy`
+
+Basically tells GeoBlock to only allow/deny a request based on the first IP address in the X-ForwardedFor HTTP header. This is useful for servers behind e.g. a Cloudflare proxy.
+
+### Define a custom log file `redirectUrlIfDenied`
+
+Allows returning a HTTP 301 status code, which indicates that the requested resource has been moved. The URL which can be specified is used to redirect the client to. So instead of "blocking" the client, the client will be redirected to the configured URL.
