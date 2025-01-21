@@ -515,6 +515,16 @@ If set to `true`, adds the X-IPCountry header to the HTTP request header. The he
 
 Allows customizing the HTTP status code returned if the request was denied.
 
+### Customize denied request HTTP headers `httpAddHeadersDeniedRequest`
+
+If defined, adds HTTP headers to denied requests.  You can pair this with `httpStatusCodeDeniedRequest` to redirect blocked sessions.
+Multiple headers can be seperated by a `;`
+
+```yaml
+httpStatusCodeDeniedRequest: 302
+httpAddHeadersDeniedRequest: Location=https://blockedyo.com;Bad=yes
+```
+
 ### Define a custom log file `logFilePath`
 
 Allows to define a target for the logs of the middleware. The path must look like the following: `logFilePath: "/log/geoblock.log"`. Make sure the folder is writeable.

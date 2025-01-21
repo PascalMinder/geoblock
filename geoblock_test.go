@@ -433,6 +433,35 @@ func TestCustomDeniedRequestStatusCode(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusTeapot)
 }
 
+func TestCustomDeniedRequestHeader(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.HTTPStatusCodeDeniedRequest = 302
+	cfg.HTTPAddHeadersDeniedRequest = "Location=http://bad.com;Bad=yes"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusFound)
+	assertResponseHeader(t, recorder.Result(), "Location", "http://bad.com")
+	assertResponseHeader(t, recorder.Result(), "Bad", "yes")
+}
+
 func TestAllowBlacklistMode(t *testing.T) {
 	cfg := createTesterConfig()
 	cfg.BlackListMode = true
@@ -988,6 +1017,14 @@ func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 }
 
 func assertHeader(t *testing.T, req *http.Request, key string, expected string) {
+	t.Helper()
+
+	if received := req.Header.Get(key); received != expected {
+		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
+	}
+}
+
+func assertResponseHeader(t *testing.T, req *http.Response, key string, expected string) {
 	t.Helper()
 
 	if received := req.Header.Get(key); received != expected {

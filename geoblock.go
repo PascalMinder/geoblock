@@ -53,6 +53,7 @@ type Config struct {
 	AllowedIPAddresses           []string `yaml:"allowedIPAddresses,omitempty"`
 	AddCountryHeader             bool     `yaml:"addCountryHeader"`
 	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
+	HTTPAddHeadersDeniedRequest  string   `yaml:"httpAddHeadersDeniedRequest"`
 	LogFilePath                  string   `yaml:"logFilePath"`
 }
 
@@ -89,6 +90,7 @@ type GeoBlock struct {
 	privateIPRanges              []*net.IPNet
 	addCountryHeader             bool
 	httpStatusCodeDeniedRequest  int
+	httpAddHeadersDeniedRequest  string
 	database                     *lru.LRUCache
 	logFile                      *os.File
 	name                         string
@@ -173,6 +175,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		database:                     cache,
 		addCountryHeader:             config.AddCountryHeader,
 		httpStatusCodeDeniedRequest:  config.HTTPStatusCodeDeniedRequest,
+		httpAddHeadersDeniedRequest:  config.HTTPAddHeadersDeniedRequest,
 		logFile:                      logFile,
 		name:                         name,
 	}, nil
@@ -194,6 +197,17 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	for _, requestIPAddress := range requestIPAddresses {
 		if !a.allowDenyIPAddress(requestIPAddress, req) {
+			// Add headers if requested (like Location on 302 if we want to redirect)
+			if len(strings.TrimSpace(a.httpAddHeadersDeniedRequest)) != 0 {
+				headers := strings.Split(a.httpAddHeadersDeniedRequest, ";")
+				for _,header := range headers {
+					fields := strings.Split(header, "=")
+					if len(fields) == 2 {
+						rw.Header().Set(fields[0], fields[1])
+					}
+				}
+			}
+
 			rw.WriteHeader(a.httpStatusCodeDeniedRequest)
 			a.next.ServeHTTP(rw, req)
 		}
