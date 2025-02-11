@@ -200,11 +200,11 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			if len(a.redirectURLIfDenied) != 0 {
 				rw.Header().Set("Location", a.redirectURLIfDenied)
 				rw.WriteHeader(http.StatusFound)
-				a.next.ServeHTTP(rw, req)
-			} else {
-				rw.WriteHeader(a.httpStatusCodeDeniedRequest)
-				a.next.ServeHTTP(rw, req)
+				return
 			}
+
+			rw.WriteHeader(a.httpStatusCodeDeniedRequest)
+			return
 		}
 	}
 

@@ -3,6 +3,7 @@ package geoblock_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -106,7 +107,7 @@ func TestAllowedCountry(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Allowed request")) })
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -124,7 +125,19 @@ func TestAllowedCountry(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	assertStatusCode(t, recorder.Result(), http.StatusOK)
+	recorderResult := recorder.Result()
+
+	assertStatusCode(t, recorderResult, http.StatusOK)
+
+	body, err := io.ReadAll(recorderResult.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedBody := "Allowed request"
+	if string(body) != expectedBody {
+		t.Fatalf("expected body %q, got %q", expectedBody, string(body))
+	}
 }
 
 func TestMultipleAllowedCountry(t *testing.T) {
@@ -385,7 +398,7 @@ func TestDeniedCountry(t *testing.T) {
 	cfg.Countries = append(cfg.Countries, "CH")
 
 	ctx := context.Background()
-	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Allowed request")) })
 
 	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
 	if err != nil {
@@ -403,7 +416,19 @@ func TestDeniedCountry(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+	recorderResult := recorder.Result()
+
+	assertStatusCode(t, recorderResult, http.StatusForbidden)
+
+	body, err := io.ReadAll(recorderResult.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedBody := ""
+	if string(body) != expectedBody {
+		t.Fatalf("expected body %q, got %q", expectedBody, string(body))
+	}
 }
 
 func TestDeniedCountryWithRedirect(t *testing.T) {
