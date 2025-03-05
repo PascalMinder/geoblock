@@ -182,6 +182,7 @@ my-GeoBlock:
             unknownCountryApiResponse: "nil"
             blackListMode: false
             addCountryHeader: false
+            delayOnDenyMs: 2000
             countries:
                 - AF # Afghanistan
                 - AL # Albania
@@ -526,3 +527,7 @@ Basically tells GeoBlock to only allow/deny a request based on the first IP addr
 ### Define a custom log file `redirectUrlIfDenied`
 
 Allows returning a HTTP 301 status code, which indicates that the requested resource has been moved. The URL which can be specified is used to redirect the client to. So instead of "blocking" the client, the client will be redirected to the configured URL.
+
+### Define a custom delay on requests `delayOnDenyMs`
+
+Add a +-50% random delay for deny requests. This is useful to limit spam from forbidden IPs.
