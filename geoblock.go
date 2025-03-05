@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -55,6 +56,7 @@ type Config struct {
 	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
 	LogFilePath                  string   `yaml:"logFilePath"`
 	RedirectURLIfDenied          string   `yaml:"redirectUrlIfDenied"`
+	DelayOnDenyMs                int      `yaml:"delayOnDenyMs"`
 }
 
 type ipEntry struct {
@@ -94,6 +96,7 @@ type GeoBlock struct {
 	logFile                      *os.File
 	redirectURLIfDenied          string
 	name                         string
+	delayOnDenyMs                int
 }
 
 // New created a new GeoBlock plugin.
@@ -178,6 +181,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		logFile:                      logFile,
 		redirectURLIfDenied:          config.RedirectURLIfDenied,
 		name:                         name,
+		delayOnDenyMs:                config.DelayOnDenyMs,
 	}, nil
 }
 
@@ -202,7 +206,12 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				rw.WriteHeader(http.StatusFound)
 				return
 			}
-
+			// Introduce a delay before responding (with +-50%)
+			if a.delayOnDenyMs > 0 {
+				randomFactor := 0.5 + rand.Float64()  // between 0.5 and 1.5
+				randomDelay := time.Duration(float64(a.delayOnDenyMs) * randomFactor)
+				time.Sleep(time.Duration(randomDelay) * time.Millisecond)
+			}
 			rw.WriteHeader(a.httpStatusCodeDeniedRequest)
 			return
 		}
