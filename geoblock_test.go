@@ -297,6 +297,37 @@ func TestMultipleIpAddresses(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
 }
 
+func TestIpAddressesWithSpaces(t *testing.T) {
+	mockServer := createMockAPIServer(t, map[string][]byte{caExampleIP: []byte(`CA`), chExampleIP: []byte(`CH`)})
+	defer mockServer.Close()
+
+	cfg := createTesterConfig()
+
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = mockServer.URL + "/{ip}"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, strings.Join([]string{chExampleIP + " "}, ","))
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
 func TestMultipleIpAddressesReverse(t *testing.T) {
 	mockServer := createMockAPIServer(t, map[string][]byte{caExampleIP: []byte(`CA`), chExampleIP: []byte(`CH`)})
 	defer mockServer.Close()
@@ -1124,6 +1155,8 @@ func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 
 func assertRequestHeader(t *testing.T, req *http.Request, key string, expected string) {
 	t.Helper()
+
+	fmt.Println(req.Header.Get(key))
 
 	if received := req.Header.Get(key); received != expected {
 		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
