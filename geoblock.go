@@ -28,10 +28,6 @@ const (
 	filePermissions                    = fs.FileMode(0666)
 )
 
-var (
-	infoLogger = log.New(io.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
-)
-
 // Config the plugin configuration.
 type Config struct {
 	SilentStartUp                bool     `yaml:"silentStartUp"`
@@ -94,10 +90,13 @@ type GeoBlock struct {
 	logFile                      *os.File
 	redirectURLIfDenied          string
 	name                         string
+	infoLogger                   *log.Logger
 }
 
 // New created a new GeoBlock plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	infoLogger := log.New(io.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
+
 	// check geolocation API uri
 	if len(config.API) == 0 || !strings.Contains(config.API, "{ip}") {
 		return nil, fmt.Errorf("no api uri given")
@@ -178,6 +177,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		logFile:                      logFile,
 		redirectURLIfDenied:          config.RedirectURLIfDenied,
 		name:                         name,
+		infoLogger:                   infoLogger,
 	}, nil
 }
 
@@ -185,7 +185,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	requestIPAddresses, err := a.collectRemoteIP(req)
 	if err != nil {
 		// if one of the ip addresses could not be parsed, return status forbidden
-		infoLogger.Println(err)
+		a.infoLogger.Println(err)
 		rw.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -216,13 +216,13 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	if isPrivateIP(*requestIPAddr, a.privateIPRanges) {
 		if a.allowLocalRequests {
 			if a.logLocalRequests {
-				infoLogger.Printf("%s: request allowed [%s] since local IP addresses are allowed", a.name, requestIPAddr)
+				a.infoLogger.Printf("%s: request allowed [%s] since local IP addresses are allowed", a.name, requestIPAddr)
 			}
 			return true
 		}
 
 		if a.logLocalRequests {
-			infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
+			a.infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
 		}
 		return false
 	}
@@ -230,7 +230,7 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	// check if the request IP address is explicitly allowed
 	if ipInSlice(*requestIPAddr, a.allowedIPAddresses) {
 		if a.logAllowedRequests {
-			infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
+			a.infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
 		}
 		return true
 	}
@@ -239,7 +239,7 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	for _, ipRange := range a.allowedIPRanges {
 		if ipRange.Contains(*requestIPAddr) {
 			if a.logLocalRequests {
-				infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
+				a.infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
 			}
 			return true
 		}
@@ -266,7 +266,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
 			return false, ""
 		} else if os.IsTimeout(err) && a.ignoreAPITimeout {
-			infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
+			a.infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
 			// TODO: this was previously an immediate response to the client
 			return true, ""
 		}
@@ -275,7 +275,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	}
 
 	if a.logAPIRequests {
-		infoLogger.Println("Loaded from database: ", entry)
+		a.infoLogger.Println("Loaded from database: ", entry)
 	}
 
 	// check if existing entry was made more than a month ago, if so update the entry
@@ -292,12 +292,12 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		(entry.Country == unknownCountryCode && a.allowUnknownCountries)
 
 	if !isAllowed {
-		infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
+		a.infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
 		return false, entry.Country
 	}
 
 	if a.logAllowedRequests {
-		infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
+		a.infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
 	}
 
 	return true, entry.Country
@@ -351,7 +351,7 @@ func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (
 	a.database.Add(ipAddressString, entry)
 
 	if a.logAPIRequests {
-		infoLogger.Println("Added to database: ", entry)
+		a.infoLogger.Println("Added to database: ", entry)
 	}
 
 	return entry, nil
@@ -365,7 +365,7 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 		}
 
 		if a.logAPIRequests {
-			infoLogger.Print("Failed to read country from HTTP header field [",
+			a.infoLogger.Print("Failed to read country from HTTP header field [",
 				a.iPGeolocationHTTPHeaderField,
 				"], continuing with API lookup.")
 		}
@@ -374,7 +374,7 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 	country, err := a.callGeoJS(ipAddressString)
 	if err != nil {
 		if !(os.IsTimeout(err) || a.ignoreAPITimeout) {
-			infoLogger.Println(err)
+			a.infoLogger.Println(err)
 		}
 		return "", err
 	}
@@ -422,7 +422,7 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	}
 
 	if a.logAPIRequests {
-		infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiURI)
+		a.infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiURI)
 	}
 
 	return countryCode, nil
@@ -575,13 +575,13 @@ func initializeLogFile(logFilePath string, logger *log.Logger) (*os.File, error)
 		return nil, nil
 	}
 
-	writable, err := isFolder(logFilePath)
+	writeable, err := isFolder(logFilePath)
 	if err != nil {
 		logger.Println(err)
 		return nil, err
-	} else if !writable {
-		logger.Println("Specified log folder is not writable")
-		return nil, fmt.Errorf("folder is not writable: %s", logFilePath)
+	} else if !writeable {
+		logger.Println("Specified log folder is not writeable")
+		return nil, fmt.Errorf("folder is not writeable: %s", logFilePath)
 	}
 
 	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, filePermissions)

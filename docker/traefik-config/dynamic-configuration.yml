@@ -5,14 +5,32 @@ http:
         geoblock:
           silentStartUp: false
           allowLocalRequests: true
-          logLocalRequests: false
+          logLocalRequests: true
           logAllowedRequests: true
-          logApiRequests: false
+          logApiRequests: true
           api: "https://get.geojs.io/v1/ip/country/{ip}"
           cacheSize: 15
           forceMonthlyUpdate: true
           allowUnknownCountries: false
           unknownCountryApiResponse: "nil"
+          logFilePath: "/geoblock/geoblockB.log"
+          countries:
+            - GB
+            - IS
+    my-plugin2:
+      plugin:
+        geoblock:
+          silentStartUp: false
+          allowLocalRequests: true
+          logLocalRequests: true
+          logAllowedRequests: true
+          logApiRequests: true
+          api: "https://get.geojs.io/v1/ip/country/{ip}"
+          cacheSize: 15
+          forceMonthlyUpdate: true
+          allowUnknownCountries: false
+          unknownCountryApiResponse: "nil"
+          logFilePath: "/geoblock/geoblockA.log"
           countries:
             - GB
             - IS
