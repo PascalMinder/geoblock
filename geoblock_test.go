@@ -737,7 +737,6 @@ func TestInvalidApiResponse(t *testing.T) {
 	var apiStub = httptest.NewServer(http.HandlerFunc(apiHandlerInvalid))
 
 	cfg := createTesterConfig()
-	fmt.Println(apiStub.URL)
 	cfg.API = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
 
@@ -770,7 +769,6 @@ func TestApiResponseTimeoutAllowed(t *testing.T) {
 	var apiStub = httptest.NewServer(http.HandlerFunc(apiTimeout))
 
 	cfg := createTesterConfig()
-	fmt.Println(apiStub.URL)
 	cfg.API = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.APITimeoutMs = 5
@@ -805,7 +803,6 @@ func TestApiResponseTimeoutNotAllowed(t *testing.T) {
 	var apiStub = httptest.NewServer(http.HandlerFunc(apiTimeout))
 
 	cfg := createTesterConfig()
-	fmt.Println(apiStub.URL)
 	cfg.API = apiStub.URL + "/{ip}"
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.APITimeoutMs = 5
@@ -861,6 +858,41 @@ func TestExplicitlyAllowedIP(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestExplicitlyAllowedIPWithIPCountryHeader(t *testing.T) {
+	// set up our fake api server
+	apiHandler := &CountryCodeHandler{ResponseCountryCode: "CA"}
+	var apiStub = httptest.NewServer(apiHandler)
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, caExampleIP)
+	cfg.LogLocalRequests = true
+	cfg.AddCountryHeader = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+	assertRequestHeader(t, req, CountryHeader, "CA")
 }
 
 func TestExplicitlyAllowedIPNoMatch(t *testing.T) {
@@ -1155,8 +1187,6 @@ func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 
 func assertRequestHeader(t *testing.T, req *http.Request, key string, expected string) {
 	t.Helper()
-
-	fmt.Println(req.Header.Get(key))
 
 	if received := req.Header.Get(key); received != expected {
 		t.Errorf("header value mismatch: %s: %s <> %s", key, expected, received)
