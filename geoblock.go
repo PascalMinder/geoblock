@@ -229,6 +229,12 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 
 	// check if the request IP address is explicitly allowed
 	if ipInSlice(*requestIPAddr, a.allowedIPAddresses) {
+		if a.addCountryHeader {
+			ok, countryCode := a.cachedRequestIP(requestIPAddr, req)
+			if ok && len(countryCode) > 0 {
+				req.Header.Set(countryHeader, countryCode)
+			}
+		}
 		if a.logAllowedRequests {
 			a.infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
 		}
@@ -238,6 +244,12 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	// check if the request IP address is contained within one of the explicitly allowed IP address ranges
 	for _, ipRange := range a.allowedIPRanges {
 		if ipRange.Contains(*requestIPAddr) {
+			if a.addCountryHeader {
+				ok, countryCode := a.cachedRequestIP(requestIPAddr, req)
+				if ok && len(countryCode) > 0 {
+					req.Header.Set(countryHeader, countryCode)
+				}
+			}
 			if a.logLocalRequests {
 				a.infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
 			}
@@ -281,7 +293,6 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	// check if existing entry was made more than a month ago, if so update the entry
 	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
-
 		if err != nil {
 			return false, ""
 		}
@@ -298,6 +309,36 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 
 	if a.logAllowedRequests {
 		a.infoLogger.Printf("%s: request allowed [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
+	}
+
+	return true, entry.Country
+}
+
+func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bool, string) {
+	ipAddressString := requestIPAddr.String()
+	cacheEntry, ok := a.database.Get(ipAddressString)
+
+	var entry ipEntry
+	var err error
+	if !ok {
+		entry, err = a.createNewIPEntry(req, ipAddressString)
+		if err != nil {
+			return false, ""
+		}
+	} else {
+		entry = cacheEntry.(ipEntry)
+	}
+
+	if a.logAPIRequests {
+		a.infoLogger.Println("Loaded from database: ", entry)
+	}
+
+	// check if existing entry was made more than a month ago, if so update the entry
+	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
+		entry, err = a.createNewIPEntry(req, ipAddressString)
+		if err != nil {
+			return false, ""
+		}
 	}
 
 	return true, entry.Country
