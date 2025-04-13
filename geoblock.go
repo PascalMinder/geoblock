@@ -317,6 +317,7 @@ func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	xRealIPList := strings.FieldsFunc(xRealIPValue, splitFn)
 
 	for _, value := range xForwardedForIPs {
+		value = strings.Trim(value, " ")
 		ipAddress, err := parseIP(value)
 		if err != nil {
 			return ipList, fmt.Errorf("parsing failed: %s", err)
@@ -326,6 +327,7 @@ func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 	}
 
 	for _, value := range xRealIPList {
+		value = strings.Trim(value, " ")
 		ipAddress, err := parseIP(value)
 		if err != nil {
 			return ipList, fmt.Errorf("parsing failed: %s", err)
@@ -456,7 +458,7 @@ func ipInSlice(a net.IP, list []net.IP) bool {
 }
 
 func parseIP(addr string) (net.IP, error) {
-	ipAddress := net.ParseIP(strings.TrimSpace(addr))
+	ipAddress := net.ParseIP(addr)
 
 	if ipAddress == nil {
 		return nil, fmt.Errorf("unable parse IP address from address [%s]", addr)
@@ -521,6 +523,7 @@ func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []
 	var allowedIPRanges []*net.IPNet
 
 	for _, ipAddressEntry := range entries {
+		ipAddressEntry = strings.Trim(ipAddressEntry, " ")
 		// Attempt to parse as CIDR
 		ip, ipBlock, err := net.ParseCIDR(ipAddressEntry)
 		if err == nil {
