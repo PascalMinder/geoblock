@@ -456,7 +456,7 @@ func ipInSlice(a net.IP, list []net.IP) bool {
 }
 
 func parseIP(addr string) (net.IP, error) {
-	ipAddress := net.ParseIP(addr)
+	ipAddress := net.ParseIP(strings.TrimSpace(addr))
 
 	if ipAddress == nil {
 		return nil, fmt.Errorf("unable parse IP address from address [%s]", addr)
