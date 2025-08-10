@@ -148,7 +148,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			<-ctx.Done() // Wait for context cancellation
 			logger.SetOutput(os.Stdout)
 			logFile.Close()
-			logger.Printf("%s; Log file closed for middleware\n", name)
+			logger.Printf("%s: Log file closed for middleware\n", name)
 		}(infoLogger)
 	}
 
