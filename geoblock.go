@@ -126,7 +126,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	// output configuration of the middleware instance
 	if !config.SilentStartUp {
-		printConfiguration(config, infoLogger)
+		infoLogger.Printf("%s: Staring middleware", name)
+		printConfiguration(name, config, infoLogger)
 	}
 
 	// create LRU cache for IP lookup
@@ -136,9 +137,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	// create custom log target if needed
-	logFile, err := initializeLogFile(config.LogFilePath, infoLogger)
+	logFile, err := initializeLogFile(name, config.LogFilePath, infoLogger)
 	if err != nil {
-		infoLogger.Printf("Error initializing log file: %v\n", err)
+		infoLogger.Printf("%s: Error initializing log file: %v\n", name, err)
 	}
 
 	// Set up a goroutine to close the file when the context is done
@@ -147,7 +148,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			<-ctx.Done() // Wait for context cancellation
 			logger.SetOutput(os.Stdout)
 			logFile.Close()
-			logger.Printf("Log file closed for middleware: %s\n", name)
+			logger.Printf("%s; Log file closed for middleware\n", name)
 		}(infoLogger)
 	}
 
@@ -185,7 +186,7 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	requestIPAddresses, err := a.collectRemoteIP(req)
 	if err != nil {
 		// if one of the ip addresses could not be parsed, return status forbidden
-		a.infoLogger.Println(err)
+		a.infoLogger.Printf("%s: %s", a.name, err)
 		rw.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -287,7 +288,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	}
 
 	if a.logAPIRequests {
-		a.infoLogger.Println("Loaded from database: ", entry)
+		a.infoLogger.Printf("%s: [%s] loaded from database: %s", a.name, requestIPAddr, entry)
 	}
 
 	// check if existing entry was made more than a month ago, if so update the entry
@@ -330,7 +331,7 @@ func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bo
 	}
 
 	if a.logAPIRequests {
-		a.infoLogger.Println("Loaded from database: ", entry)
+		a.infoLogger.Printf("%s: [%s] Loaded from database: %s", a.name, ipAddressString, entry)
 	}
 
 	// check if existing entry was made more than a month ago, if so update the entry
@@ -392,7 +393,7 @@ func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (
 	a.database.Add(ipAddressString, entry)
 
 	if a.logAPIRequests {
-		a.infoLogger.Println("Added to database: ", entry)
+		a.infoLogger.Printf("%s: [%s] added to database: %s", a.name, ipAddressString, entry)
 	}
 
 	return entry, nil
@@ -406,16 +407,14 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 		}
 
 		if a.logAPIRequests {
-			a.infoLogger.Print("Failed to read country from HTTP header field [",
-				a.iPGeolocationHTTPHeaderField,
-				"], continuing with API lookup.")
+			a.infoLogger.Printf("%s: Failed to read country from HTTP header field [%s], continuing with API lookup.", a.name, a.iPGeolocationHTTPHeaderField)
 		}
 	}
 
 	country, err := a.callGeoJS(ipAddressString)
 	if err != nil {
 		if !(os.IsTimeout(err) || a.ignoreAPITimeout) {
-			a.infoLogger.Println(err)
+			a.infoLogger.Printf("%s: %s", a.name, err)
 		}
 		return "", err
 	}
@@ -463,7 +462,7 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	}
 
 	if a.logAPIRequests {
-		a.infoLogger.Printf("Country [%s] for ip %s fetched from %s", countryCode, ipAddress, apiURI)
+		a.infoLogger.Printf("%s: Country [%s] for ip %s fetched from %s", a.name, countryCode, ipAddress, apiURI)
 	}
 
 	return countryCode, nil
@@ -584,50 +583,50 @@ func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []
 	return allowedIPAddresses, allowedIPRanges
 }
 
-func printConfiguration(config *Config, logger *log.Logger) {
-	logger.Printf("allow local IPs: %t", config.AllowLocalRequests)
-	logger.Printf("log local requests: %t", config.LogLocalRequests)
-	logger.Printf("log allowed requests: %t", config.LogAllowedRequests)
-	logger.Printf("log api requests: %t", config.LogAPIRequests)
+func printConfiguration(name string, config *Config, logger *log.Logger) {
+	logger.Printf("%s: allow local IPs: %t", name, config.AllowLocalRequests)
+	logger.Printf("%s: log local requests: %t", name, config.LogLocalRequests)
+	logger.Printf("%s: log allowed requests: %t", name, config.LogAllowedRequests)
+	logger.Printf("%s: log api requests: %t", name, config.LogAPIRequests)
 	if len(config.IPGeolocationHTTPHeaderField) == 0 {
-		logger.Printf("use custom HTTP header field for country lookup: %t", false)
+		logger.Printf("%s: use custom HTTP header field for country lookup: %t", name, false)
 	} else {
-		logger.Printf("use custom HTTP header field for country lookup: %t [%s]", true, config.IPGeolocationHTTPHeaderField)
+		logger.Printf("%s: use custom HTTP header field for country lookup: %t [%s]", name, true, config.IPGeolocationHTTPHeaderField)
 	}
-	logger.Printf("API uri: %s", config.API)
-	logger.Printf("API timeout: %d", config.APITimeoutMs)
-	logger.Printf("ignore API timeout: %t", config.IgnoreAPITimeout)
-	logger.Printf("cache size: %d", config.CacheSize)
-	logger.Printf("force monthly update: %t", config.ForceMonthlyUpdate)
-	logger.Printf("allow unknown countries: %t", config.AllowUnknownCountries)
-	logger.Printf("unknown country api response: %s", config.UnknownCountryAPIResponse)
-	logger.Printf("blacklist mode: %t", config.BlackListMode)
-	logger.Printf("add country header: %t", config.AddCountryHeader)
-	logger.Printf("countries: %v", config.Countries)
-	logger.Printf("Denied request status code: %d", config.HTTPStatusCodeDeniedRequest)
-	logger.Printf("Log file path: %s", config.LogFilePath)
+	logger.Printf("%s: API uri: %s", name, config.API)
+	logger.Printf("%s: API timeout: %d", name, config.APITimeoutMs)
+	logger.Printf("%s: ignore API timeout: %t", name, config.IgnoreAPITimeout)
+	logger.Printf("%s: cache size: %d", name, config.CacheSize)
+	logger.Printf("%s: force monthly update: %t", name, config.ForceMonthlyUpdate)
+	logger.Printf("%s: allow unknown countries: %t", name, config.AllowUnknownCountries)
+	logger.Printf("%s: unknown country api response: %s", name, config.UnknownCountryAPIResponse)
+	logger.Printf("%s: blacklist mode: %t", name, config.BlackListMode)
+	logger.Printf("%s: add country header: %t", name, config.AddCountryHeader)
+	logger.Printf("%s: countries: %v", name, config.Countries)
+	logger.Printf("%s: Denied request status code: %d", name, config.HTTPStatusCodeDeniedRequest)
+	logger.Printf("%s: Log file path: %s", name, config.LogFilePath)
 	if len(config.RedirectURLIfDenied) != 0 {
-		logger.Printf("Redirect URL on denied requests: %s", config.RedirectURLIfDenied)
+		logger.Printf("%s: Redirect URL on denied requests: %s", name, config.RedirectURLIfDenied)
 	}
 }
 
-func initializeLogFile(logFilePath string, logger *log.Logger) (*os.File, error) {
+func initializeLogFile(name string, logFilePath string, logger *log.Logger) (*os.File, error) {
 	if len(logFilePath) == 0 {
 		return nil, nil
 	}
 
 	writeable, err := isFolder(logFilePath)
 	if err != nil {
-		logger.Println(err)
+		logger.Printf("%s: %s", name, err)
 		return nil, err
 	} else if !writeable {
-		logger.Println("Specified log folder is not writeable")
-		return nil, fmt.Errorf("folder is not writeable: %s", logFilePath)
+		logger.Printf("%s: Specified log folder is not writeable: %s", name, logFilePath)
+		return nil, fmt.Errorf("%s: folder is not writeable: %s", name, logFilePath)
 	}
 
 	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, filePermissions)
 	if err != nil {
-		logger.Printf("Failed to open log file: %v\n", err)
+		logger.Printf("%s: Failed to open log file: %v\n", name, err)
 		return nil, err
 	}
 
