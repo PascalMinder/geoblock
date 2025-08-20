@@ -410,7 +410,7 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 			a.infoLogger.Printf(
 				"%s: Failed to read country from HTTP header field [%s], continuing with API lookup.",
 				a.name,
-				a.iPGeolocationHTTPHeaderField
+				a.iPGeolocationHTTPHeaderField,
 			)
 		}
 	}
@@ -598,7 +598,7 @@ func printConfiguration(name string, config *Config, logger *log.Logger) {
 		logger.Printf("%s: use custom HTTP header field for country lookup: %t [%s]",
 			name,
 			true,
-			config.IPGeolocationHTTPHeaderField
+			config.IPGeolocationHTTPHeaderField,
 		)
 	}
 	logger.Printf("%s: API uri: %s", name, config.API)
