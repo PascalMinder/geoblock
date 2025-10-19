@@ -1177,6 +1177,145 @@ func TestCustomLogFile(t *testing.T) {
 	assertStatusCode(t, recorder.Result(), http.StatusOK)
 }
 
+func TestLogDeniedDueToHeaderError_FirstCall(t *testing.T) {
+	apiHandler := &CountryCodeHandler{ResponseCountryCode: "CA"}
+
+	// set up our fake api server
+	var apiStub = httptest.NewServer(apiHandler)
+
+	tempDir, err := os.MkdirTemp("", "logtest")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.IPGeolocationHTTPHeaderField = ipGeolocationHTTPHeaderField
+	cfg.LogFilePath = tempDir + "/info.log"
+	cfg.LogAllowedRequests = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, chExampleIP)
+	req.Header.Set(cfg.IPGeolocationHTTPHeaderField, "C")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+
+	content, err := os.ReadFile(cfg.LogFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	wrongCountryCode := "Failed to read country from HTTP header field [cf-ipcountry], continuing with API lookup"
+	countryNotAllowed := "request denied [82.220.110.18] for country [CA] due to: country is not allowed"
+
+	if len(content) == 0 ||
+		!strings.Contains(string(content), wrongCountryCode) ||
+		!strings.Contains(string(content), countryNotAllowed) {
+		t.Fatalf("Empty custom log file or missing expected log lines.")
+	}
+}
+
+func TestTimeoutOnApiResponse_DenyWhenIgnoreTimeoutFalse(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "logtest")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Stub server that responds too slowly for our client timeout.
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(50 * time.Millisecond) // > APITimeoutMs below
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.APITimeoutMs = 5         // 5ms client timeout
+	cfg.IgnoreAPITimeout = false // timeouts should DENY
+	cfg.LogFilePath = tempDir + "/info.log"
+	cfg.LogAllowedRequests = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+
+	content, err := os.ReadFile(cfg.LogFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	timeoutError := "context deadline exceeded"
+
+	if len(content) == 0 || !strings.Contains(string(content), timeoutError) {
+		t.Fatalf("Empty custom log file or missing expected log lines.")
+	}
+}
+
+func TestTimeoutOnApiResponse_AllowWhenIgnoreTimeoutTrue(t *testing.T) {
+	// Stub server that responds too slowly for our client timeout.
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(50 * time.Millisecond) // > APITimeoutMs below
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.APITimeoutMs = 5        // 5ms client timeout
+	cfg.IgnoreAPITimeout = true // timeouts should ALLOW
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Result(), http.StatusOK)
+}
+
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 

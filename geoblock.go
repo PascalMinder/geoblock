@@ -277,6 +277,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	if !ok {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
+			a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
 			return false, ""
 		} else if os.IsTimeout(err) && a.ignoreAPITimeout {
 			a.infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
@@ -295,16 +296,38 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
+			a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
 			return false, ""
 		}
 	}
 
 	// check if we are in black/white-list mode and allow/deny based on country code
-	isAllowed := (stringInSlice(entry.Country, a.countries) != a.blackListMode) ||
-		(entry.Country == unknownCountryCode && a.allowUnknownCountries)
+	isUnknownCountry := entry.Country == unknownCountryCode
+	isCountryAllowed := stringInSlice(entry.Country, a.countries) != a.blackListMode
+	isAllowed := isCountryAllowed || (isUnknownCountry && a.allowUnknownCountries)
 
 	if !isAllowed {
-		a.infoLogger.Printf("%s: request denied [%s] for country [%s]", a.name, requestIPAddr, entry.Country)
+		switch {
+		case isUnknownCountry && !a.allowUnknownCountries:
+			a.infoLogger.Printf(
+				"%s: request denied [%s] for country [%s] due to: unknown country",
+				a.name,
+				requestIPAddr,
+				entry.Country)
+		case !isCountryAllowed:
+			a.infoLogger.Printf(
+				"%s: request denied [%s] for country [%s] due to: country is not allowed",
+				a.name,
+				requestIPAddr,
+				entry.Country)
+		default:
+			a.infoLogger.Printf(
+				"%s: request denied [%s] for country [%s]",
+				a.name,
+				requestIPAddr,
+				entry.Country)
+		}
+
 		return false, entry.Country
 	}
 
@@ -406,13 +429,11 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 			return country, nil
 		}
 
-		if a.logAPIRequests {
-			a.infoLogger.Printf(
-				"%s: Failed to read country from HTTP header field [%s], continuing with API lookup.",
-				a.name,
-				a.iPGeolocationHTTPHeaderField,
-			)
-		}
+		a.infoLogger.Printf(
+			"%s: Failed to read country from HTTP header field [%s], continuing with API lookup.",
+			a.name,
+			a.iPGeolocationHTTPHeaderField,
+		)
 	}
 
 	country, err := a.callGeoJS(ipAddressString)
