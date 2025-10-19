@@ -3,7 +3,10 @@ package lrucache
 
 import (
 	"container/list"
+	"encoding/gob"
 	"errors"
+	"io"
+	"os"
 	"sync"
 )
 
@@ -19,6 +22,16 @@ type LRUCache struct {
 type cacheEntry struct {
 	key   interface{}
 	value interface{}
+}
+
+type kv struct {
+	K interface{}
+	V interface{}
+}
+
+type onDisk struct {
+	Size    int
+	Entries []kv // most-recent first
 }
 
 // New constructs a new cache instance
@@ -152,4 +165,64 @@ func (c *LRUCache) removeElement(entry *list.Element) {
 
 	e := entry.Value.(*cacheEntry)
 	delete(c.items, e.key)
+}
+
+func (c *LRUCache) Export(w io.Writer) error {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	data := onDisk{
+		Size:    c.size,
+		Entries: make([]kv, 0, c.evictList.Len()),
+	}
+	for e := c.evictList.Front(); e != nil; e = e.Next() {
+		ent := e.Value.(*cacheEntry)
+		data.Entries = append(data.Entries, kv{K: ent.key, V: ent.value})
+	}
+	enc := gob.NewEncoder(w)
+	return enc.Encode(&data)
+}
+
+func (c *LRUCache) Import(r io.Reader) error {
+	var data onDisk
+	dec := gob.NewDecoder(r)
+	if err := dec.Decode(&data); err != nil {
+		return err
+	}
+	if data.Size <= 1 {
+		return errors.New("invalid cache size in import")
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.size = data.Size
+	c.items = make(map[interface{}]*list.Element, len(data.Entries))
+	c.evictList.Init()
+
+	for _, p := range data.Entries {
+		ent := &cacheEntry{key: p.K, value: p.V}
+		el := c.evictList.PushBack(ent) // we’ll flip at the end
+		c.items[p.K] = el
+	}
+
+	return nil
+}
+
+func (c *LRUCache) ExportToFile(path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return c.Export(f)
+}
+
+func (c *LRUCache) ImportFromFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return c.Import(f)
 }
