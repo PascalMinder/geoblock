@@ -3,6 +3,7 @@ package geoblock
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -12,26 +13,61 @@ import (
 	lru "github.com/PascalMinder/geoblock/lrucache"
 )
 
-func InitializeCache(ctx context.Context, logger *log.Logger, name string, cacheSize int, cachePath string) (*lru.LRUCache, *CachePersist) {
-	cache, err := lru.NewLRUCache(cacheSize)
+const defaultWriteCycle = 15
+
+// Options configures cache initialization and persistence behavior.
+type Options struct {
+	// CacheSize specifies the number of entries to store in memory.
+	CacheSize int
+
+	// CachePath is the file path used for on-disk persistence.
+	// Leave empty to disable persistence.
+	CachePath string
+
+	// PersistInterval defines how often the cache is automatically
+	// flushed to disk. Defaults to 15 seconds if zero.
+	PersistInterval time.Duration
+
+	// Logger is used for diagnostic messages.
+	Logger *log.Logger
+
+	// Name is included in log messages to identify the cache instance.
+	Name string
+}
+
+// InitializeCache creates a new LRU cache and, if a valid persistence
+// path is provided, starts a background goroutine to periodically
+// save snapshots to disk.
+//
+// The returned `CachePersist` can be used to mark the cache as dirty when
+// data changes. If persistence is disabled, it is a no-op.
+//
+// Callers should cancel the provided context to stop persistence
+// and ensure a final snapshot is written.
+func InitializeCache(ctx context.Context, opts Options) (*lru.LRUCache, *CachePersist, error) {
+	if opts.PersistInterval <= 0 {
+		opts.PersistInterval = defaultWriteCycle * time.Second
+	}
+
+	cache, err := lru.NewLRUCache(opts.CacheSize)
 	if err != nil {
-		logger.Fatal(err)
+		return nil, nil, fmt.Errorf("create LRU cache: %w", err)
 	}
 
 	var ipDB *CachePersist // stays nil if disabled
-	if path, err := ValidatePersistencePath(cachePath); len(path) > 0 {
+	if path, err := ValidatePersistencePath(opts.CachePath); len(path) > 0 {
 		// load existing cache
 		if err := cache.ImportFromFile(path); err != nil && !os.IsNotExist(err) {
-			logger.Printf("%s: could not load IP DB snapshot (%s): %v", name, path, err)
+			opts.Logger.Printf("%s: could not load IP DB snapshot (%s): %v", opts.Name, path, err)
 		}
 
 		ipDB = &CachePersist{
 			path:           path,
-			persistTicker:  time.NewTicker(15 * time.Second),
+			persistTicker:  time.NewTicker(opts.PersistInterval),
 			persistChannel: make(chan struct{}, 1),
 			cache:          cache,
-			log:            logger,
-			name:           name,
+			log:            opts.Logger,
+			name:           opts.Name,
 		}
 
 		go func(ctx context.Context, p *CachePersist) {
@@ -49,16 +85,17 @@ func InitializeCache(ctx context.Context, logger *log.Logger, name string, cache
 			}
 		}(ctx, ipDB)
 
-		logger.Printf("%s: IP database persistence enabled -> %s", name, path)
+		opts.Logger.Printf("%s: IP database persistence enabled -> %s", opts.Name, path)
 	} else if err != nil {
-		logger.Printf("%s: IP database persistence disabled: %v", name, err)
+		opts.Logger.Printf("%s: IP database persistence disabled: %v", opts.Name, err)
 	} else {
-		logger.Printf("%s: IP database persistence disabled (no path)", name)
+		opts.Logger.Printf("%s: IP database persistence disabled (no path)", opts.Name)
 	}
 
-	return cache, ipDB
+	return cache, ipDB, nil
 }
 
+// CachePersist periodically snapshots a cache to disk.
 type CachePersist struct {
 	path           string
 	persistTicker  *time.Ticker
@@ -70,6 +107,7 @@ type CachePersist struct {
 	name  string
 }
 
+// MarkDirty marks the cache as modified and schedules a snapshot.
 func (p *CachePersist) MarkDirty() {
 	if p == nil { // feature OFF
 		return
@@ -81,6 +119,7 @@ func (p *CachePersist) MarkDirty() {
 	}
 }
 
+// Snapshot writes the cache to disk if it has been marked dirty.
 func (p *CachePersist) snapshotToDisk() {
 	if p == nil || atomic.LoadUint32(&p.ipDirty) == 0 {
 		return

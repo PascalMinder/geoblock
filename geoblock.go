@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -24,7 +23,7 @@ const (
 	unknownCountryCode                 = "AA"
 	countryCodeLength                  = 2
 	defaultDeniedRequestHTTPStatusCode = 403
-	filePermissions                    = fs.FileMode(0666)
+	defaultCacheWriteCycle             = 15
 )
 
 // Config the plugin configuration.
@@ -144,7 +143,17 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	// initialize local IP lookup cache
-	cache, ipDB := InitializeCache(ctx, infoLogger, name, config.CacheSize, config.IPDatabaseCachePath)
+	cacheOptions := Options{
+		CacheSize:       config.CacheSize,
+		CachePath:       config.IPDatabaseCachePath,
+		PersistInterval: defaultCacheWriteCycle,
+		Logger:          infoLogger,
+		Name:            name,
+	}
+	cache, ipDB, err := InitializeCache(ctx, cacheOptions)
+	if err != nil {
+		infoLogger.Fatal(err)
+	}
 
 	return &GeoBlock{
 		next:                         next,
