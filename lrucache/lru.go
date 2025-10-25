@@ -179,14 +179,14 @@ func (c *LRUCache) Export(w io.Writer) error {
 		ent := e.Value.(*cacheEntry)
 		data.Entries = append(data.Entries, kv{K: ent.key, V: ent.value})
 	}
-	enc := gob.NewEncoder(w)
-	return enc.Encode(&data)
+	return gob.NewEncoder(w).Encode(&data)
 }
 
+// Import replaces the cache contents, preserving LRU order.
+// Assumes Entries are MRU -> LRU (same as Export).
 func (c *LRUCache) Import(r io.Reader) error {
 	var data onDisk
-	dec := gob.NewDecoder(r)
-	if err := dec.Decode(&data); err != nil {
+	if err := gob.NewDecoder(r).Decode(&data); err != nil {
 		return err
 	}
 	if data.Size <= 1 {
@@ -200,12 +200,16 @@ func (c *LRUCache) Import(r io.Reader) error {
 	c.items = make(map[interface{}]*list.Element, len(data.Entries))
 	c.evictList.Init()
 
+	// Keep MRU at Front by appending in MRU -> LRU order.
 	for _, p := range data.Entries {
 		ent := &cacheEntry{key: p.K, value: p.V}
 		el := c.evictList.PushBack(ent) // we’ll flip at the end
 		c.items[p.K] = el
 	}
 
+	for c.evictList.Len() > c.size {
+		c.removeOldest()
+	}
 	return nil
 }
 
@@ -217,7 +221,6 @@ func (c *LRUCache) ExportToFile(path string) error {
 	defer f.Close()
 	return c.Export(f)
 }
-
 func (c *LRUCache) ImportFromFile(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
