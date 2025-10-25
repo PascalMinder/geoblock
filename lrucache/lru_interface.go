@@ -3,7 +3,8 @@ package lrucache
 
 // Cache defines the interface for the LRU cache
 type Cache interface {
-	// Add a new value to the cache and updates the recent-ness. Returns true if an eviction occurred.
+	// Add a new value to the cache and updates the recent-ness.
+	// Returns true if an eviction occurred.
 	Add(key, value interface{}) bool
 
 	// Return a key's value if found in the cache and updates the recent-ness.
@@ -15,12 +16,12 @@ type Cache interface {
 	// Remove a key from the cache.
 	Remove(key interface{}) bool
 
-	// Return a slice which all keys ordered by newest to oldest.
+	// Return a slice with all keys ordered MRU -> LRU.
 	Keys() []interface{}
 
-	// Return number of entry in the cache.
+	// Return number of entries in the cache.
 	Length() int
 
-	// Remove all entries form the cache.
+	// Remove all entries from the cache.
 	Purge()
 }
