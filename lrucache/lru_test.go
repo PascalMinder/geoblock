@@ -330,3 +330,162 @@ func TestLRUCacheImportInvalidData(t *testing.T) {
 		t.Fatalf("expected error on invalid gob data, got nil")
 	}
 }
+
+func TestLRUCacheExportDoesNotMutateRecency(t *testing.T) {
+	gob.Register(userData{})
+
+	cache, _ := NewLRUCache(3)
+	cache.Add("A", userData{"A", time.Now()})
+	cache.Add("B", userData{"B", time.Now()})
+	cache.Add("C", userData{"C", time.Now()})
+
+	wantOrder := cache.Keys() // MRU->LRU
+
+	var buf bytes.Buffer
+	if err := cache.Export(&buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	gotOrder := cache.Keys()
+	if !reflect.DeepEqual(wantOrder, gotOrder) {
+		t.Fatalf("Export changed recency: want=%v got=%v", wantOrder, gotOrder)
+	}
+}
+
+func TestLRUCacheSnapshotBasic(t *testing.T) {
+	gob.Register(userData{})
+
+	cache, _ := NewLRUCache(4)
+	cache.Add("X", userData{"X", time.Now()})
+	cache.Add("Y", userData{"Y", time.Now()})
+	cache.Add("Z", userData{"Z", time.Now()})
+
+	size, pairs := cache.Snapshot()
+	if size != 4 {
+		t.Fatalf("Snapshot size mismatch: want=4 got=%d", size)
+	}
+	if len(pairs) != 3 {
+		t.Fatalf("Snapshot entries mismatch: want=3 got=%d", len(pairs))
+	}
+
+	// Verify MRU->LRU order via Keys()
+	keys := cache.Keys()
+	for i, k := range keys {
+		if pairs[i].Key != k {
+			t.Fatalf("Snapshot order mismatch at %d: want=%v got=%v", i, k, pairs[i].Key)
+		}
+	}
+
+	// Mutate snapshot slice; cache must stay intact
+	if len(pairs) > 0 {
+		pairs[0].Key = "MUTATED"
+	}
+	keys2 := cache.Keys()
+	if keys2[0] == "MUTATED" {
+		t.Fatalf("Cache affected by snapshot slice mutation")
+	}
+}
+
+func TestLRUCacheImportEnforcesSize(t *testing.T) {
+	gob.Register(userData{})
+
+	// Build an on-disk payload with Size=2 but 3 entries (MRU->LRU: K1, K2, K3)
+	now := time.Now()
+	payload := onDisk{
+		Size: 2,
+		Entries: []kv{
+			{K: "K1", V: userData{"V1", now}},
+			{K: "K2", V: userData{"V2", now}},
+			{K: "K3", V: userData{"V3", now}},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(&payload); err != nil {
+		t.Fatalf("encode payload failed: %v", err)
+	}
+
+	cache, _ := NewLRUCache(10) // will be overwritten by import
+	if err := cache.Import(&buf); err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	if gotLen := cache.Length(); gotLen != 2 {
+		t.Fatalf("Import did not enforce size: want=2 got=%d", gotLen)
+	}
+
+	// The two most recent should remain: K1, K2 (MRU->LRU)
+	want := []interface{}{"K1", "K2"}
+	got := cache.Keys()
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("Unexpected keys after size enforcement: want=%v got=%v", want, got)
+	}
+	if cache.Contains("K3") {
+		t.Fatalf("Oldest (K3) should have been evicted")
+	}
+}
+
+func TestLRUCacheExportToFileAtomicOverwritesCorruptFile(t *testing.T) {
+	gob.Register(userData{})
+
+	cache, _ := NewLRUCache(5)
+	cache.Add("u1", userData{"User1", time.Now()})
+	cache.Add("u2", userData{"User2", time.Now()})
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cache.gob")
+
+	// Write corrupt content first
+	if err := os.WriteFile(path, []byte("corrupt-data"), 0o600); err != nil {
+		t.Fatalf("failed to seed corrupt file: %v", err)
+	}
+
+	// Atomic export should overwrite with a valid gob
+	if err := cache.ExportToFileAtomic(path); err != nil {
+		t.Fatalf("ExportToFileAtomic failed: %v", err)
+	}
+
+	// Now ImportFromFile must succeed and match keys
+	cache2, _ := NewLRUCache(2) // size should be replaced by import
+	if err := cache2.ImportFromFile(path); err != nil {
+		t.Fatalf("ImportFromFile failed after atomic export: %v", err)
+	}
+
+	want := cache.Keys()
+	got := cache2.Keys()
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("keys mismatch after atomic file roundtrip: want=%v got=%v", want, got)
+	}
+}
+
+func TestLRUCacheExportImportEmptyCache(t *testing.T) {
+	cache, err := NewLRUCache(3) // valid size
+	if err != nil {
+		t.Fatalf("NewLRUCache failed: %v", err)
+	}
+
+	// Export an empty cache
+	var buf bytes.Buffer
+	if err := cache.Export(&buf); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// Import into a (different) valid cache instance
+	cache2, err := NewLRUCache(2) // must be >1, will be overwritten by import anyway
+	if err != nil {
+		t.Fatalf("NewLRUCache failed: %v", err)
+	}
+	if err := cache2.Import(&buf); err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	// Still empty after roundtrip
+	if cache2.Length() != 0 {
+		t.Fatalf("expected empty cache after importing empty export, got %d", cache2.Length())
+	}
+
+	// Size should match the exporter’s size (3)
+	if got := cache2.size; got != 3 { // ok: test is in same package
+		t.Fatalf("expected imported size 3, got %d", got)
+	}
+}
