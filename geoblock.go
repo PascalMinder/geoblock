@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,8 +49,9 @@ type Config struct {
 	AllowedIPAddresses           []string `yaml:"allowedIPAddresses,omitempty"`
 	AddCountryHeader             bool     `yaml:"addCountryHeader"`
 	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
-	LogFilePath                  string   `yaml:"logFilePath"`
 	RedirectURLIfDenied          string   `yaml:"redirectUrlIfDenied"`
+	LogFilePath                  string   `yaml:"logFilePath"`
+	IPDatabaseCachePath          string   `yaml:"ipDatabaseCachePath"`
 }
 
 type ipEntry struct {
@@ -93,6 +93,7 @@ type GeoBlock struct {
 	redirectURLIfDenied          string
 	name                         string
 	infoLogger                   *log.Logger
+	ipDatabasePersistence        *CachePersist
 }
 
 // New created a new GeoBlock plugin.
@@ -132,27 +133,18 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		printConfiguration(name, config, infoLogger)
 	}
 
-	// create LRU cache for IP lookup
-	cache, err := lru.NewLRUCache(config.CacheSize)
-	if err != nil {
-		infoLogger.Fatal(err)
-	}
-
 	// create custom log target if needed
-	logFile, err := initializeLogFile(name, config.LogFilePath, infoLogger)
-	if err != nil {
-		infoLogger.Printf("%s: Error initializing log file: %v\n", name, err)
+	var logFile *os.File
+	if len(config.LogFilePath) > 0 {
+		logTarget, err := CreateCustomLogTarget(ctx, infoLogger, name, config.LogFilePath)
+		if err != nil {
+			infoLogger.Fatal(err)
+		}
+		logFile = logTarget
 	}
 
-	// Set up a goroutine to close the file when the context is done
-	if logFile != nil {
-		go func(logger *log.Logger) {
-			<-ctx.Done() // Wait for context cancellation
-			logger.SetOutput(os.Stdout)
-			logFile.Close()
-			logger.Printf("%s: Log file closed for middleware\n", name)
-		}(infoLogger)
-	}
+	// initialize local IP lookup cache
+	cache, ipDB := InitializeCache(ctx, infoLogger, name, config.CacheSize, config.IPDatabaseCachePath)
 
 	return &GeoBlock{
 		next:                         next,
@@ -182,6 +174,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		redirectURLIfDenied:          config.RedirectURLIfDenied,
 		name:                         name,
 		infoLogger:                   infoLogger,
+		ipDatabasePersistence:        ipDB, // may be nil => feature OFF
 	}, nil
 }
 
@@ -296,6 +289,8 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		}
 	} else {
 		entry = cacheEntry.(ipEntry)
+		// order has changed
+		a.ipDatabasePersistence.MarkDirty()
 	}
 
 	if a.logAPIRequests {
@@ -365,6 +360,8 @@ func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bo
 		}
 	} else {
 		entry = cacheEntry.(ipEntry)
+		// order has changed
+		a.ipDatabasePersistence.MarkDirty()
 	}
 
 	if a.logAPIRequests {
@@ -428,6 +425,7 @@ func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (
 
 	entry = ipEntry{Country: country, Timestamp: time.Now()}
 	a.database.Add(ipAddressString, entry)
+	a.ipDatabasePersistence.MarkDirty() // new entry in the cache
 
 	if a.logAPIRequests {
 		a.infoLogger.Printf("%s: [%s] added to database: %s", a.name, ipAddressString, entry)
@@ -655,45 +653,4 @@ func printConfiguration(name string, config *Config, logger *log.Logger) {
 	if len(config.RedirectURLIfDenied) != 0 {
 		logger.Printf("%s: Redirect URL on denied requests: %s", name, config.RedirectURLIfDenied)
 	}
-}
-
-func initializeLogFile(name string, logFilePath string, logger *log.Logger) (*os.File, error) {
-	if len(logFilePath) == 0 {
-		return nil, nil
-	}
-
-	writeable, err := isFolder(logFilePath)
-	if err != nil {
-		logger.Printf("%s: %s", name, err)
-		return nil, err
-	} else if !writeable {
-		logger.Printf("%s: Specified log folder is not writeable: %s", name, logFilePath)
-		return nil, fmt.Errorf("%s: folder is not writeable: %s", name, logFilePath)
-	}
-
-	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, filePermissions)
-	if err != nil {
-		logger.Printf("%s: Failed to open log file: %v\n", name, err)
-		return nil, err
-	}
-
-	logger.SetOutput(logFile)
-	return logFile, nil
-}
-
-func isFolder(filePath string) (bool, error) {
-	dirPath := filepath.Dir(filePath)
-	info, err := os.Stat(dirPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, fmt.Errorf("path does not exist")
-		}
-		return false, fmt.Errorf("error checking path: %w", err)
-	}
-
-	if !info.IsDir() {
-		return false, fmt.Errorf("folder does not exist")
-	}
-
-	return true, nil
 }

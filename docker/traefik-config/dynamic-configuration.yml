@@ -31,6 +31,7 @@ http:
           allowUnknownCountries: false
           unknownCountryApiResponse: "nil"
           logFilePath: "/geoblock/geoblockA.log"
+          ipDatabaseCachePath: "/geoblock/cacheA.cache"
           countries:
             - GB
             - IS
