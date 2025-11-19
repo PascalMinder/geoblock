@@ -468,6 +468,10 @@ Timeout for the call to the api uri.
 
 If the `ignoreAPITimeout` option is set to `true`, a request is allowed even if the API could not be reached.
 
+### Ignore the API failures `ignoreAPIFailures`
+
+If the `ignoreAPIFailures` option is set to `true`, a request is allowed even if the API returns a non-200 status code or an error occurs during the API request.
+
 ### Set custom HTTP header field to retrieve the country code from `ipGeolocationHttpHeaderField`
 
 Allow setting the name of a custom HTTP header field to retrieve the country code from. E.g. `cf-ipcountry` for Cloudflare.
