@@ -38,6 +38,7 @@ type Config struct {
 	API                          string   `yaml:"api"`
 	APITimeoutMs                 int      `yaml:"apiTimeoutMs"`
 	IgnoreAPITimeout             bool     `yaml:"ignoreApiTimeout"`
+	IgnoreAPIFailures            bool     `yaml:"ignoreApiFailures"`
 	IPGeolocationHTTPHeaderField string   `yaml:"ipGeolocationHttpHeaderField"`
 	XForwardedForReverseProxy    bool     `yaml:"xForwardedForReverseProxy"`
 	CacheSize                    int      `yaml:"cacheSize"`
@@ -74,6 +75,7 @@ type GeoBlock struct {
 	apiURI                       string
 	apiTimeoutMs                 int
 	ignoreAPITimeout             bool
+	ignoreAPIFailures            bool
 	iPGeolocationHTTPHeaderField string
 	xForwardedForReverseProxy    bool
 	forceMonthlyUpdate           bool
@@ -162,6 +164,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		apiURI:                       config.API,
 		apiTimeoutMs:                 config.APITimeoutMs,
 		ignoreAPITimeout:             config.IgnoreAPITimeout,
+		ignoreAPIFailures:            config.IgnoreAPIFailures,
 		iPGeolocationHTTPHeaderField: config.IPGeolocationHTTPHeaderField,
 		xForwardedForReverseProxy:    config.XForwardedForReverseProxy,
 		forceMonthlyUpdate:           config.ForceMonthlyUpdate,
@@ -270,19 +273,26 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 
 func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bool, string) {
 	ipAddressString := requestIPAddr.String()
-	cacheEntry, ok := a.database.Get(ipAddressString)
+	cacheEntry, cacheHit := a.database.Get(ipAddressString)
 
 	var entry ipEntry
 	var err error
-	if !ok {
+	if !cacheHit {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
-		if err != nil && !(os.IsTimeout(err) && a.ignoreAPITimeout) {
+		if err != nil {
+			if a.ignoreAPIFailures {
+				a.infoLogger.Printf("%s: request allowed [%s] due to API failure", a.name, requestIPAddr)
+				return true, ""
+			}
+
+			if os.IsTimeout(err) && a.ignoreAPITimeout {
+				a.infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
+				// TODO: this was previously an immediate response to the client
+				return true, ""
+			}
+
 			a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
 			return false, ""
-		} else if os.IsTimeout(err) && a.ignoreAPITimeout {
-			a.infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
-			// TODO: this was previously an immediate response to the client
-			return true, ""
 		}
 	} else {
 		entry = cacheEntry.(ipEntry)
@@ -296,6 +306,10 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
+			if a.ignoreAPIFailures {
+				a.infoLogger.Printf("%s: request allowed [%s] due to API failure", a.name, requestIPAddr)
+				return true, ""
+			}
 			a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
 			return false, ""
 		}
@@ -462,6 +476,10 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	res, err := geoJsClient.Do(req)
 	if err != nil {
 		return "", err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API response status code: %d", res.StatusCode)
 	}
 
 	if res.Body != nil {

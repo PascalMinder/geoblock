@@ -1316,6 +1316,64 @@ func TestTimeoutOnApiResponse_AllowWhenIgnoreTimeoutTrue(t *testing.T) {
 	assertStatusCode(t, rec.Result(), http.StatusOK)
 }
 
+func TestErrorOnApiResponse_AllowWhenIgnoreAPIFailuresTrue(t *testing.T) {
+	// Stub server that fails to respond correctly.
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.IgnoreAPIFailures = true // API failures should ALLOW
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Result(), http.StatusOK)
+}
+
+func TestErrorOnApiResponse_AllowWhenIgnoreAPIFailuresFalse(t *testing.T) {
+	// Stub server that fails to respond correctly.
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.IgnoreAPIFailures = false // API failures should DENY
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+}
+
 func assertStatusCode(t *testing.T, req *http.Response, expected int) {
 	t.Helper()
 
