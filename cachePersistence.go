@@ -163,5 +163,4 @@ func (p *CachePersist) snapshotToDisk() {
 	}
 
 	atomic.StoreUint32(&p.ipDirty, 0)
-	p.log.Printf("%s: cache snapshot written to %s", p.name, p.path)
 }
