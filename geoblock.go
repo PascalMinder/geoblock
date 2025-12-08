@@ -131,7 +131,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	// output configuration of the middleware instance
 	if !config.SilentStartUp {
-		infoLogger.Printf("%s: Staring middleware", name)
+		infoLogger.Printf("%s: Starting middleware", name)
 		printConfiguration(name, config, infoLogger)
 	}
 

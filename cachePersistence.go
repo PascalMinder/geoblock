@@ -13,114 +13,145 @@ import (
 	lru "github.com/PascalMinder/geoblock/lrucache"
 )
 
-const defaultWriteCycle = 15
+const (
+	DefaultPersistInterval      = 10 * time.Second
+	PersistIntervalMultiplicate = 3
+)
 
-// Options configures cache initialization and persistence behavior.
+// Options describes how to initialize the in-memory cache and optional persistence.
 type Options struct {
-	// CacheSize specifies the number of entries to store in memory.
-	CacheSize int
-
-	// CachePath is the file path used for on-disk persistence.
-	// Leave empty to disable persistence.
-	CachePath string
-
-	// PersistInterval defines how often the cache is automatically
-	// flushed to disk. Defaults to 15 seconds if zero.
-	PersistInterval time.Duration
-
-	// Logger is used for diagnostic messages.
-	Logger *log.Logger
-
-	// Name is included in log messages to identify the cache instance.
-	Name string
+	CacheSize       int
+	CachePath       string        // file path for persisted cache; if empty or invalid → feature OFF
+	PersistInterval time.Duration // base interval; used for debounce + max interval
+	Logger          *log.Logger
+	Name            string
 }
 
-// InitializeCache creates a new LRU cache and, if a valid persistence
-// path is provided, starts a background goroutine to periodically
-// save snapshots to disk.
-//
-// The returned `CachePersist` can be used to mark the cache as dirty when
-// data changes. If persistence is disabled, it is a no-op.
-//
-// Callers should cancel the provided context to stop persistence
-// and ensure a final snapshot is written.
-func InitializeCache(ctx context.Context, opts Options) (*lru.LRUCache, *CachePersist, error) {
-	if opts.PersistInterval <= 0 {
-		opts.PersistInterval = defaultWriteCycle * time.Second
-	}
-
-	cache, err := lru.NewLRUCache(opts.CacheSize)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create LRU cache: %w", err)
-	}
-
-	var ipDB *CachePersist // stays nil if disabled
-	if path, err := ValidatePersistencePath(opts.CachePath); len(path) > 0 {
-		// load existing cache
-		if err := cache.ImportFromFile(path); err != nil && !os.IsNotExist(err) {
-			opts.Logger.Printf("%s: could not load IP DB snapshot (%s): %v", opts.Name, path, err)
-		}
-
-		ipDB = &CachePersist{
-			path:           path,
-			persistTicker:  time.NewTicker(opts.PersistInterval),
-			persistChannel: make(chan struct{}, 1),
-			cache:          cache,
-			log:            opts.Logger,
-			name:           opts.Name,
-		}
-
-		go func(ctx context.Context, p *CachePersist) {
-			defer p.persistTicker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					p.snapshotToDisk()
-					return
-				case <-p.persistTicker.C:
-					p.snapshotToDisk()
-				case <-p.persistChannel:
-					p.snapshotToDisk()
-				}
-			}
-		}(ctx, ipDB)
-
-		opts.Logger.Printf("%s: IP database persistence enabled -> %s", opts.Name, path)
-	} else if err != nil {
-		opts.Logger.Printf("%s: IP database persistence disabled: %v", opts.Name, err)
-	} else {
-		opts.Logger.Printf("%s: IP database persistence disabled (no path)", opts.Name)
-	}
-
-	return cache, ipDB, nil
-}
-
-// CachePersist periodically snapshots a cache to disk.
+// CachePersist manages debounced, low-CPU persistence of the LRU cache.
 type CachePersist struct {
-	path           string
-	persistTicker  *time.Ticker
-	persistChannel chan struct{}
-	ipDirty        uint32 // 0 clean, 1 dirty
-
+	path  string
 	cache *lru.LRUCache
 	log   *log.Logger
 	name  string
+
+	ch   chan struct{} // edge-trigger signal (coalesced)
+	quit chan struct{} // stop signal
+
+	minInterval time.Duration // debounce interval
+	maxInterval time.Duration // hard max between flushes
+
+	ipDirty   uint32       // 0 clean, 1 dirty
+	lastFlush atomic.Int64 // unix nano of last successful flush
 }
 
-// MarkDirty marks the cache as modified and schedules a snapshot.
+// NewCachePersist constructs a new persistence controller.
+// It does NOT start the worker; caller must call go p.Run(ctx).
+func NewCachePersist(
+	path string, cache *lru.LRUCache, logger *log.Logger, name string, persistInterval time.Duration) *CachePersist {
+	if persistInterval <= 0 {
+		persistInterval = DefaultPersistInterval
+	}
+
+	p := &CachePersist{
+		path:        path,
+		cache:       cache,
+		log:         logger,
+		name:        name,
+		ch:          make(chan struct{}, 1),
+		quit:        make(chan struct{}),
+		minInterval: persistInterval,
+		maxInterval: PersistIntervalMultiplicate * persistInterval,
+	}
+	p.lastFlush.Store(time.Now().UnixNano())
+	return p
+}
+
+// MarkDirty marks the cache as needing a flush and nudges the worker.
 func (p *CachePersist) MarkDirty() {
-	if p == nil { // feature OFF
+	if p == nil {
 		return
 	}
 	atomic.StoreUint32(&p.ipDirty, 1)
 	select {
-	case p.persistChannel <- struct{}{}:
+	case p.ch <- struct{}{}:
 	default:
+		// already scheduled; no need to push again
 	}
 }
 
-// Snapshot writes the cache to disk if it has been marked dirty.
-func (p *CachePersist) snapshotToDisk() {
+func (p *CachePersist) Run(ctx context.Context) {
+	if p == nil {
+		return
+	}
+
+	wait := func(d time.Duration) bool {
+		if d <= 0 {
+			return false
+		}
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return true
+		case <-p.quit:
+			return true
+		case <-t.C:
+			return false
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			p.flushIfDirty()
+			return
+		case <-p.quit:
+			p.flushIfDirty()
+			return
+
+		case <-p.ch:
+			// Drain additional nudges to coalesce bursts
+			drained := true
+			for drained {
+				select {
+				case <-p.ch:
+				default:
+					drained = false
+				}
+			}
+
+			now := time.Now()
+			last := time.Unix(0, p.lastFlush.Load())
+			since := now.Sub(last)
+			untilMin := p.minInterval - since
+			untilMax := p.maxInterval - since
+
+			// If we already exceeded max interval, flush immediately.
+			if untilMax <= 0 {
+				p.flushIfDirty()
+				continue
+			}
+
+			// Otherwise wait the rest of the debounce window.
+			if wait(untilMin) {
+				p.flushIfDirty()
+				return
+			}
+
+			p.flushIfDirty()
+		}
+	}
+}
+
+// Stop asks the worker to stop and does a final flush.
+func (p *CachePersist) Stop() {
+	if p == nil {
+		return
+	}
+	close(p.quit)
+}
+
+func (p *CachePersist) flushIfDirty() {
 	if p == nil || atomic.LoadUint32(&p.ipDirty) == 0 {
 		return
 	}
@@ -141,26 +172,65 @@ func (p *CachePersist) snapshotToDisk() {
 
 	if _, err := tmp.Write(buf.Bytes()); err != nil {
 		tmp.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		p.log.Printf("%s: snapshot write error: %v", p.name, err)
 		return
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		p.log.Printf("%s: snapshot fsync error: %v", p.name, err)
 		return
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		p.log.Printf("%s: snapshot close error: %v", p.name, err)
 		return
 	}
 	if err := os.Rename(tmpPath, p.path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		p.log.Printf("%s: snapshot rename error: %v", p.name, err)
 		return
 	}
 
 	atomic.StoreUint32(&p.ipDirty, 0)
+	p.lastFlush.Store(time.Now().UnixNano())
+}
+
+func InitializeCache(ctx context.Context, opt Options) (*lru.LRUCache, *CachePersist, error) {
+	if opt.CacheSize <= 1 {
+		return nil, nil, fmt.Errorf("cache size must be bigger than 1")
+	}
+
+	cache, err := lru.NewLRUCache(opt.CacheSize)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create lru cache: %w", err)
+	}
+
+	logger := opt.Logger
+	if logger == nil {
+		logger = log.New(os.Stdout, "", log.LstdFlags)
+	}
+
+	var persist *CachePersist
+
+	if opt.CachePath != "" {
+		path, err := ValidatePersistencePath(opt.CachePath)
+		if err != nil {
+			logger.Printf("%s: IP cache persistence disabled (path invalid): %v", opt.Name, err)
+		} else {
+			// Try warm load; ignore file-not-exist
+			if err := cache.ImportFromFile(path); err != nil && !os.IsNotExist(err) {
+				logger.Printf("%s: failed to warm-load IP cache from %s: %v", opt.Name, path, err)
+			}
+
+			persist = NewCachePersist(path, cache, logger, opt.Name, opt.PersistInterval)
+			go persist.Run(ctx)
+			logger.Printf("%s: IP cache persistence enabled -> %s", opt.Name, path)
+		}
+	} else {
+		logger.Printf("%s: IP cache persistence disabled (no path configured)", opt.Name)
+	}
+
+	return cache, persist, nil
 }
