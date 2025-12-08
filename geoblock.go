@@ -3,6 +3,7 @@ package geoblock
 
 import (
 	"context"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"log"
@@ -97,6 +98,8 @@ type GeoBlock struct {
 
 // New created a new GeoBlock plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	gob.Register(ipEntry{})
+
 	infoLogger := log.New(io.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
 
 	// check geolocation API uri
