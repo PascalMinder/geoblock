@@ -483,7 +483,7 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		a.infoLogger("API response status code: %d", res.StatusCode")
+		a.infoLogger("API response status code: %d", res.StatusCode)
 		return "", fmt.Errorf("API response status code: %d", res.StatusCode)
 	}
 
