@@ -467,14 +467,18 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	}
 
 	apiURI := strings.Replace(a.apiURI, "{ip}", ipAddress, 1)
-
+    if a.logAPIRequests {
+	    logger.Printf(""%s: Sending request to %s", a.name, apiURI)
+	}
 	req, err := http.NewRequest(http.MethodGet, apiURI, nil)
 	if err != nil {
+		logger.Printf("Error: %s", err)
 		return "", err
 	}
 
 	res, err := geoJsClient.Do(req)
 	if err != nil {
+		logger.Printf("Error: %s", err)
 		return "", err
 	}
 
