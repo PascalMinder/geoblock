@@ -1,6 +1,6 @@
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.6.4
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -18,13 +18,35 @@ services:
       - "80:80"
 
   hello:
-    image: containous/whoami
+    image: traefik/whoami
     labels:
       - traefik.enable=true
       - traefik.http.routers.hello.entrypoints=http
       - traefik.http.routers.hello.rule=Host(`hello.localhost`)
       - traefik.http.services.hello.loadbalancer.server.port=80
       - traefik.http.routers.hello.middlewares=my-plugin@file
+
+  hello1:
+    image: traefik/whoami
+    command:
+      - --port=81
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hello1.entrypoints=http
+      - traefik.http.routers.hello1.rule=Host(`hello1.localhost`)
+      - traefik.http.services.hello1.loadbalancer.server.port=81
+      - traefik.http.routers.hello1.middlewares=my-plugin@file
+
+  hello2:
+    image: traefik/whoami
+    command:
+      - --port=82
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hello2.entrypoints=http
+      - traefik.http.routers.hello2.rule=Host(`hello2.localhost`)
+      - traefik.http.services.hello2.loadbalancer.server.port=82
+      - traefik.http.routers.hello2.middlewares=my-plugin@file
 
   whoami:
     image: jwilder/whoami
