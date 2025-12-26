@@ -1427,6 +1427,219 @@ func apiTimeout(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+func TestExcludedPathPattern(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^[^/]+/health$")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(allowedRequest))
+	})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	recorderResult := recorder.Result()
+
+	assertStatusCode(t, recorderResult, http.StatusOK)
+
+	body, err := io.ReadAll(recorderResult.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedBody := allowedRequest
+	if string(body) != expectedBody {
+		t.Fatalf("expected body %q, got %q", expectedBody, string(body))
+	}
+}
+
+func TestExcludedDomainPattern(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^webhook\\.example\\.com")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(allowedRequest))
+	})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://webhook.example.com/github", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	recorderResult := recorder.Result()
+
+	assertStatusCode(t, recorderResult, http.StatusOK)
+
+	body, err := io.ReadAll(recorderResult.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedBody := allowedRequest
+	if string(body) != expectedBody {
+		t.Fatalf("expected body %q, got %q", expectedBody, string(body))
+	}
+}
+
+func TestExcludedDomainAndPathPattern(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^webhook\\.example\\.com/github$")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(allowedRequest))
+	})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://webhook.example.com/github", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestExcludedDomainAndPathPatternNoMatch(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^webhook\\.example\\.com/github$")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://webhook.example.com/stripe", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestExcludedPathPatternMultiple(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^[^/]+/health$", "^[^/]+/status$", "^[^/]+/api/webhook/.*")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(allowedRequest))
+	})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []string{"/health", "/status", "/api/webhook/github", "/api/webhook/stripe"}
+
+	for _, path := range tests {
+		recorder := httptest.NewRecorder()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost"+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req.Header.Add(xForwardedFor, caExampleIP)
+
+		handler.ServeHTTP(recorder, req)
+
+		assertStatusCode(t, recorder.Result(), http.StatusOK)
+	}
+}
+
+func TestExcludedPathPatternNoMatch(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^[^/]+/health$")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/api", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, caExampleIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+}
+
+func TestInvalidExcludedPathPattern(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "[invalid")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	_, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+
+	if err == nil {
+		t.Fatal("expected error for invalid regex pattern")
+	}
+}
+
 func createTesterConfig() *geoblock.Config {
 	cfg := geoblock.CreateConfig()
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -52,6 +53,7 @@ type Config struct {
 	HTTPStatusCodeDeniedRequest  int      `yaml:"httpStatusCodeDeniedRequest"`
 	LogFilePath                  string   `yaml:"logFilePath"`
 	RedirectURLIfDenied          string   `yaml:"redirectUrlIfDenied"`
+	ExcludedPathPatterns         []string `yaml:"excludedPathPatterns,omitempty"`
 }
 
 type ipEntry struct {
@@ -91,6 +93,7 @@ type GeoBlock struct {
 	database                     *lru.LRUCache
 	logFile                      *os.File
 	redirectURLIfDenied          string
+	excludedPathRegexps          []*regexp.Regexp
 	name                         string
 	infoLogger                   *log.Logger
 }
@@ -123,6 +126,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	// build allowed IP and IP ranges lists
 	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
+
+	// compile excluded path regex patterns
+	excludedPathRegexps, err := compileExcludedPathPatterns(config.ExcludedPathPatterns, infoLogger)
+	if err != nil {
+		return nil, err
+	}
 
 	infoLogger.SetOutput(os.Stdout)
 
@@ -180,12 +189,22 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		httpStatusCodeDeniedRequest:  config.HTTPStatusCodeDeniedRequest,
 		logFile:                      logFile,
 		redirectURLIfDenied:          config.RedirectURLIfDenied,
+		excludedPathRegexps:          excludedPathRegexps,
 		name:                         name,
 		infoLogger:                   infoLogger,
 	}, nil
 }
 
 func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	fullURL := req.Host + req.URL.Path
+	if a.isPathExcluded(fullURL) {
+		if a.logAllowedRequests {
+			a.infoLogger.Printf("%s: request allowed for [%s] due to excluded path pattern", a.name, fullURL)
+		}
+		a.next.ServeHTTP(rw, req)
+		return
+	}
+
 	requestIPAddresses, err := a.collectRemoteIP(req)
 	if err != nil {
 		// if one of the ip addresses could not be parsed, return status forbidden
@@ -213,6 +232,15 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	a.next.ServeHTTP(rw, req)
+}
+
+func (a *GeoBlock) isPathExcluded(path string) bool {
+	for _, pattern := range a.excludedPathRegexps {
+		if pattern.MatchString(path) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) bool {
@@ -626,6 +654,21 @@ func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []
 	return allowedIPAddresses, allowedIPRanges
 }
 
+func compileExcludedPathPatterns(patterns []string, logger *log.Logger) ([]*regexp.Regexp, error) {
+	var regexps []*regexp.Regexp
+
+	for _, pattern := range patterns {
+		pattern = strings.Trim(pattern, " ")
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex pattern [%s]: %w", pattern, err)
+		}
+		regexps = append(regexps, regex)
+	}
+
+	return regexps, nil
+}
+
 func printConfiguration(name string, config *Config, logger *log.Logger) {
 	logger.Printf("%s: allow local IPs: %t", name, config.AllowLocalRequests)
 	logger.Printf("%s: log local requests: %t", name, config.LogLocalRequests)
@@ -654,6 +697,9 @@ func printConfiguration(name string, config *Config, logger *log.Logger) {
 	logger.Printf("%s: Log file path: %s", name, config.LogFilePath)
 	if len(config.RedirectURLIfDenied) != 0 {
 		logger.Printf("%s: Redirect URL on denied requests: %s", name, config.RedirectURLIfDenied)
+	}
+	if len(config.ExcludedPathPatterns) > 0 {
+		logger.Printf("%s: Excluded path patterns: %v", name, config.ExcludedPathPatterns)
 	}
 }
 

@@ -73,6 +73,9 @@ http:
           unknownCountryApiResponse: "nil"
           countries:
             - CH
+          excludedPathPatterns:
+            - "^[^/]+/health$"
+            - "^[^/]+/status$"
 ```
 
 ### Traefik Plugin registry
@@ -124,6 +127,9 @@ http:
           unknownCountryApiResponse: "nil"
           countries:
             - CH
+          excludedPathPatterns:
+            - "^[^/]+/health$"
+            - "^[^/]+/status$"
 ```
 
 And some example docker file for traefik:
@@ -182,6 +188,9 @@ my-GeoBlock:
       unknownCountryApiResponse: "nil"
       blackListMode: false
       addCountryHeader: false
+      excludedPathPatterns:
+        - "^[^/]+/health$"
+        - "^[^/]+/status$"
       countries:
         - AF # Afghanistan
         - AL # Albania
@@ -530,3 +539,34 @@ Basically tells GeoBlock to only allow/deny a request based on the first IP addr
 ### Define a custom log file `redirectUrlIfDenied`
 
 Allows returning a HTTP 301 status code, which indicates that the requested resource has been moved. The URL which can be specified is used to redirect the client to. So instead of "blocking" the client, the client will be redirected to the configured URL.
+
+### Excluded Path Patterns `excludedPathPatterns`
+
+Allows defining a list of regex patterns for requests that should bypass all geoblock checks. Requests matching any of these patterns will be allowed immediately without performing IP lookups, cache checks, or API calls. 
+
+Patterns are matched against the full request URL in the format: `domain.com/path`. This allows you to exclude:
+- Specific paths on any domain
+- Specific domains entirely
+- Specific paths on specific domains
+
+This is useful for:
+- Health check endpoints (`/health`, `/ping`)
+- Webhook endpoints that need to accept requests from anywhere
+- Metrics/monitoring endpoints
+- Public API endpoints
+- Specific subdomains
+
+```yaml
+excludedPathPatterns:
+  - "^[^/]+/health$"                    # /health on any domain
+  - "^[^/]+/status$"                    # /status on any domain
+  - "^webhook\.example\.com"            # Any path on webhook.example.com
+  - "^webhook\.example\.com/github$"    # Only /github on webhook.example.com
+  - "^[^/]+/api/webhook/.*"             # /api/webhook/* on any domain
+  - "^[^/]+/metrics.*"                  # /metrics* on any domain
+  - "^monitoring\.example\.com/.*"      # All paths on monitoring.example.com
+```
+
+**Pattern Format:** The pattern matches against `{domain}{path}` (e.g., `example.com/health`, `api.example.com/webhook/github`)
+
+**Note:** Patterns are evaluated as regular expressions. Use `^` to match the start and `$` to match the end. The pattern `[^/]+` matches any domain. Invalid regex patterns will cause the plugin to fail at startup.
