@@ -128,7 +128,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
 
 	// compile excluded path regex patterns
-	excludedPathRegexps, err := compileExcludedPathPatterns(config.ExcludedPathPatterns, infoLogger)
+	excludedPathRegexps, err := compileExcludedPathPatterns(config.ExcludedPathPatterns)
 	if err != nil {
 		return nil, err
 	}
@@ -654,7 +654,7 @@ func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []
 	return allowedIPAddresses, allowedIPRanges
 }
 
-func compileExcludedPathPatterns(patterns []string, logger *log.Logger) ([]*regexp.Regexp, error) {
+func compileExcludedPathPatterns(patterns []string) ([]*regexp.Regexp, error) {
 	var regexps []*regexp.Regexp
 
 	for _, pattern := range patterns {
