@@ -495,18 +495,23 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	}
 
 	apiURI := strings.Replace(a.apiURI, "{ip}", ipAddress, 1)
-
+    if a.logAPIRequests {
+	    a.infoLogger.Printf("%s: Sending request to %s", a.name, apiURI)
+	}
 	req, err := http.NewRequest(http.MethodGet, apiURI, nil)
 	if err != nil {
+		a.infoLogger.Printf("Error: %s", err)
 		return "", err
 	}
 
 	res, err := geoJsClient.Do(req)
 	if err != nil {
+		a.infoLogger.Printf("Error: %s", err)
 		return "", err
 	}
 
 	if res.StatusCode != http.StatusOK {
+		a.infoLogger.Printf("API response status code: %d", res.StatusCode)
 		return "", fmt.Errorf("API response status code: %d", res.StatusCode)
 	}
 
@@ -516,6 +521,7 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
+		a.infoLogger.Printf("Error: %s", err)
 		return "", err
 	}
 
@@ -524,11 +530,13 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 
 	// api response for unknown country
 	if len([]rune(countryCode)) == len(a.unknownCountryCode) && countryCode == a.unknownCountryCode {
+		a.infoLogger.Printf("Unknown Country Code")
 		return unknownCountryCode, nil
 	}
 
 	// this could possible cause a DoS attack
 	if len([]rune(countryCode)) != countryCodeLength {
+		a.infoLogger.Printf("API response has more or less than 2 characters")
 		return "", fmt.Errorf("API response has more or less than 2 characters")
 	}
 
