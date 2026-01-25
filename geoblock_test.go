@@ -1,12 +1,15 @@
 package geoblock_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1638,6 +1641,99 @@ func TestInvalidExcludedPathPattern(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid regex pattern")
 	}
+}
+
+func TestInitializeCache_PersistsAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	cacheFile := filepath.Join(tmpDir, "ip-cache.db")
+
+	// Buffer-backed logger
+	var logBuf bytes.Buffer
+	logger := log.New(&logBuf, "", 0)
+
+	opt := geoblock.Options{
+		Name:            "test",
+		CacheSize:       32,
+		CachePath:       cacheFile,
+		PersistInterval: 20 * time.Millisecond, // small interval to keep test fast
+		Logger:          logger,
+	}
+
+	// --- Run 1 (before restart): create cache, write entry, wait for persistence file to be written.
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		cache, persist, err := geoblock.InitializeCache(ctx, opt)
+		if err != nil {
+			t.Fatalf("InitializeCache(run1) failed: %v", err)
+		}
+		if cache == nil {
+			t.Fatal("InitializeCache(run1) returned nil cache")
+		}
+		if persist == nil {
+			t.Fatal("expected persistence enabled (persist != nil) when CachePath is valid")
+		}
+
+		// Write a value that must survive restart.
+		cache.Add("1.2.3.4", true)
+		persist.MarkDirty()
+
+		// Wait until persistence has written a file
+		waitForFileNonEmpty(t, cacheFile, 2*time.Second)
+
+		// Stop the persist goroutine cleanly.
+		cancel()
+
+		// Give the goroutine a moment to observe ctx cancellation
+		time.Sleep(30 * time.Millisecond)
+	}
+
+	// --- Run 2 (after restart): InitializeCache should warm-load from file.
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		cache, persist, err := geoblock.InitializeCache(ctx, opt)
+		if err != nil {
+			t.Fatalf("InitializeCache(run2) failed: %v", err)
+		}
+		if cache == nil {
+			t.Fatal("InitializeCache(run2) returned nil cache")
+		}
+		if persist == nil {
+			t.Fatal("expected persistence enabled on run2 as well")
+		}
+
+		// Verify warm-loaded entry exists.
+		if _, ok := cache.Get("1.2.3.4"); !ok {
+			t.Fatalf("expected key %q to be present after restart (warm-load)", "1.2.3.4")
+		}
+
+		cancel()
+	}
+}
+
+func waitForFileNonEmpty(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		fi, err := os.Stat(path)
+		if err == nil && fi.Size() > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// One last attempt to provide a better failure message.
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("persistence file %q was not created within %s: %v", path, timeout, err)
+	}
+	t.Fatalf("persistence file %q remained empty within %s (size=%d)", path, timeout, fi.Size())
 }
 
 func createTesterConfig() *geoblock.Config {

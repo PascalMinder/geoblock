@@ -542,14 +542,16 @@ Allows returning a HTTP 301 status code, which indicates that the requested reso
 
 ### Excluded Path Patterns `excludedPathPatterns`
 
-Allows defining a list of regex patterns for requests that should bypass all geoblock checks. Requests matching any of these patterns will be allowed immediately without performing IP lookups, cache checks, or API calls. 
+Allows defining a list of regex patterns for requests that should bypass all geoblock checks. Requests matching any of these patterns will be allowed immediately without performing IP lookups, cache checks, or API calls.
 
 Patterns are matched against the full request URL in the format: `domain.com/path`. This allows you to exclude:
+
 - Specific paths on any domain
 - Specific domains entirely
 - Specific paths on specific domains
 
 This is useful for:
+
 - Health check endpoints (`/health`, `/ping`)
 - Webhook endpoints that need to accept requests from anywhere
 - Metrics/monitoring endpoints
@@ -570,3 +572,15 @@ excludedPathPatterns:
 **Pattern Format:** The pattern matches against `{domain}{path}` (e.g., `example.com/health`, `api.example.com/webhook/github`)
 
 **Note:** Patterns are evaluated as regular expressions. Use `^` to match the start and `$` to match the end. The pattern `[^/]+` matches any domain. Invalid regex patterns will cause the plugin to fail at startup.
+
+### Persistent IP database cache `ipDatabaseCachePath`
+
+Enables persistence for the internal IP database cache by storing cache contents on disk and restoring them on startup. When configured, GeoBlock will attempt to warm-load the cache from the specified file during initialization and periodically persist updates in the background.
+
+If the path is invalid or not writable, cache persistence is automatically disabled and GeoBlock will continue to operate with an in-memory cache only.
+
+This improves startup performance and reduces external IP lookup requests after restarts.
+
+```yaml
+ipDatabaseCachePath: "/var/lib/geoblock/ip-cache.db"
+```
