@@ -40,8 +40,8 @@ type CachePersist struct {
 	minInterval time.Duration // debounce interval
 	maxInterval time.Duration // hard max between flushes
 
-	ipDirty   uint32       // 0 clean, 1 dirty
-	lastFlush atomic.Int64 // unix nano of last successful flush
+	cacheDirty uint32       // 0 clean, 1 dirty
+	lastFlush  atomic.Int64 // unix nano of last successful flush
 }
 
 // NewCachePersist constructs a new persistence controller.
@@ -71,7 +71,7 @@ func (p *CachePersist) MarkDirty() {
 	if p == nil {
 		return
 	}
-	atomic.StoreUint32(&p.ipDirty, 1)
+	atomic.StoreUint32(&p.cacheDirty, 1)
 	select {
 	case p.ch <- struct{}{}:
 	default:
@@ -152,7 +152,7 @@ func (p *CachePersist) Stop() {
 }
 
 func (p *CachePersist) flushIfDirty() {
-	if p == nil || atomic.LoadUint32(&p.ipDirty) == 0 {
+	if p == nil || atomic.LoadUint32(&p.cacheDirty) == 0 {
 		return
 	}
 
@@ -193,7 +193,7 @@ func (p *CachePersist) flushIfDirty() {
 		return
 	}
 
-	atomic.StoreUint32(&p.ipDirty, 0)
+	atomic.StoreUint32(&p.cacheDirty, 0)
 	p.lastFlush.Store(time.Now().UnixNano())
 }
 
