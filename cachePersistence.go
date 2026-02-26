@@ -24,6 +24,7 @@ type Options struct {
 	CachePath       string        // file path for persisted cache; if empty or invalid > feature OFF
 	PersistInterval time.Duration // base interval; used for debounce + max interval
 	Logger          *log.Logger
+	SilentStartUp   bool
 	Name            string
 }
 
@@ -226,7 +227,9 @@ func InitializeCache(ctx context.Context, opt Options) (*lru.LRUCache, *CachePer
 
 			persist = NewCachePersist(path, cache, logger, opt.Name, opt.PersistInterval)
 			go persist.Run(ctx)
-			logger.Printf("%s: IP cache persistence enabled -> %s", opt.Name, path)
+			if !opt.SilentStartUp {
+				logger.Printf("%s: IP cache persistence enabled -> %s", opt.Name, path)
+			}
 		}
 	} else {
 		logger.Printf("%s: IP cache persistence disabled (no path configured)", opt.Name)
