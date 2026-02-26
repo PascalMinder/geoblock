@@ -431,6 +431,7 @@ func TestAllowedUnknownCountry(t *testing.T) {
 
 	cfg.Countries = append(cfg.Countries, "CH")
 	cfg.AllowUnknownCountries = true
+	cfg.UnknownCountryAPIResponse = ""
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
@@ -1571,7 +1572,12 @@ func TestExcludedDomainAndPathPatternNoMatch(t *testing.T) {
 func TestExcludedPathPatternMultiple(t *testing.T) {
 	cfg := createTesterConfig()
 	cfg.Countries = append(cfg.Countries, "CH")
-	cfg.ExcludedPathPatterns = append(cfg.ExcludedPathPatterns, "^[^/]+/health$", "^[^/]+/status$", "^[^/]+/api/webhook/.*")
+	cfg.ExcludedPathPatterns = append(
+		cfg.ExcludedPathPatterns,
+		"^[^/]+/health$",
+		"^[^/]+/status$",
+		"^[^/]+/api/webhook/.*",
+	)
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

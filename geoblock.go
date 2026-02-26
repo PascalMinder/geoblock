@@ -160,6 +160,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		CachePath:       config.IPDatabaseCachePath,
 		PersistInterval: defaultCacheWriteCycle,
 		Logger:          infoLogger,
+		SilentStartUp:   config.SilentStartUp,
 		Name:            name,
 	}
 	cache, ipDB, err := InitializeCache(ctx, cacheOptions)
@@ -218,7 +219,8 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// only keep the first IP address, which should be the client (if the proxy behaves itself), to check if allowed or denied
+	// Only keep the first IP address (should be the client, if the proxy behaves itself)
+	// so we can check whether it is allowed or denied.
 	if a.xForwardedForReverseProxy {
 		requestIPAddresses = requestIPAddresses[:1]
 	}
@@ -490,7 +492,7 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 
 	country, err := a.callGeoJS(ipAddressString)
 	if err != nil {
-		if !(os.IsTimeout(err) || a.ignoreAPITimeout) {
+		if !os.IsTimeout(err) && !a.ignoreAPITimeout {
 			a.infoLogger.Printf("%s: %s", a.name, err)
 		}
 		return "", err
