@@ -1,6 +1,9 @@
 name: Go Matrix
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   cross:
     name: Go
