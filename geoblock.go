@@ -104,73 +104,114 @@ type GeoBlock struct {
 // New created a new GeoBlock plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	gob.Register(ipEntry{})
+	infoLogger := buildLogger()
 
-	infoLogger := log.New(io.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
-
-	// check geolocation API uri
-	if len(config.API) == 0 || !strings.Contains(config.API, "{ip}") {
-		return nil, fmt.Errorf("no api uri given")
-	}
-
-	// check if at least one allowed country is provided
-	if len(config.Countries) == 0 {
-		return nil, fmt.Errorf("no allowed country code provided")
-	}
-
-	// set default API timeout if non is given
-	if config.APITimeoutMs == 0 {
-		config.APITimeoutMs = 750
-	}
-
-	// set default HTTP status code for denied requests if non other is supplied
-	deniedRequestHTTPStatusCode, err := getHTTPStatusCodeDeniedRequest(config.HTTPStatusCodeDeniedRequest)
-	if err != nil {
+	if err := validateConfig(config); err != nil {
 		return nil, err
 	}
-	config.HTTPStatusCodeDeniedRequest = deniedRequestHTTPStatusCode
 
-	// build allowed IP and IP ranges lists
+	if err := applyDefaults(config); err != nil {
+		return nil, err
+	}
+
 	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
 
-	// compile excluded path regex patterns
 	excludedPathRegexps, err := compileExcludedPathPatterns(config.ExcludedPathPatterns)
 	if err != nil {
 		return nil, err
 	}
 
 	infoLogger.SetOutput(os.Stdout)
-
-	// output configuration of the middleware instance
 	if !config.SilentStartUp {
 		infoLogger.Printf("%s: Starting middleware", name)
 		printConfiguration(name, config, infoLogger)
 	}
 
-	// create custom log target if needed
-	var logFile *os.File
-	if len(config.LogFilePath) > 0 {
-		logTarget, err := CreateCustomLogTarget(ctx, infoLogger, name, config.LogFilePath)
-		if err != nil {
-			infoLogger.Fatal(err)
-		}
-		logFile = logTarget
+	logFile, err := buildLogTarget(ctx, config, infoLogger, name)
+	if err != nil {
+		return nil, err
 	}
 
-	// initialize local IP lookup cache
+	cache, ipDB, err := buildCache(config, infoLogger, name)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildGeoBlock(
+		next, config, name, infoLogger, logFile, cache, ipDB,
+		allowedIPAddresses, allowedIPRanges, excludedPathRegexps,
+	), nil
+}
+
+func validateConfig(config *Config) error {
+	if len(config.API) == 0 || !strings.Contains(config.API, "{ip}") {
+		return fmt.Errorf("no api uri given")
+	}
+
+	if len(config.Countries) == 0 {
+		return fmt.Errorf("no allowed country code provided")
+	}
+
+	return nil
+}
+
+func applyDefaults(config *Config) error {
+	if config.APITimeoutMs == 0 {
+		config.APITimeoutMs = 750
+	}
+
+	deniedRequestHTTPStatusCode, err := getHTTPStatusCodeDeniedRequest(config.HTTPStatusCodeDeniedRequest)
+	if err != nil {
+		return err
+	}
+	config.HTTPStatusCodeDeniedRequest = deniedRequestHTTPStatusCode
+
+	return nil
+}
+
+func buildLogger() *log.Logger {
+	return log.New(io.Discard, "INFO: GeoBlock: ", log.Ldate|log.Ltime)
+}
+
+func buildLogTarget(ctx context.Context, config *Config, logger *log.Logger, name string) (*os.File, error) {
+	if len(config.LogFilePath) == 0 {
+		return nil, nil
+	}
+
+	logTarget, err := CreateCustomLogTarget(ctx, logger, name, config.LogFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return logTarget, nil
+}
+
+func buildCache(config *Config, logger *log.Logger, name string) (*lru.LRUCache, *CachePersist, error) {
 	cacheOptions := Options{
 		CacheSize:       config.CacheSize,
 		CachePath:       config.IPDatabaseCachePath,
 		PersistInterval: defaultCacheWriteCycle,
-		Logger:          infoLogger,
+		Logger:          logger,
 		SilentStartUp:   config.SilentStartUp,
 		Name:            name,
 	}
-	// Share one cache + persistence worker per middleware (see GetOrInitCache).
-	cache, ipDB, err := GetOrInitCache(cacheOptions)
-	if err != nil {
-		infoLogger.Fatal(err)
-	}
 
+	// Share one cache + persistence worker per middleware (see GetOrInitCache).
+	return GetOrInitCache(cacheOptions)
+}
+
+func buildGeoBlock(
+	next http.Handler,
+	config *Config,
+	name string,
+	logger *log.Logger,
+	logFile *os.File,
+	cache *lru.LRUCache,
+	ipDB *CachePersist,
+	allowedIPAddresses []net.IP,
+	allowedIPRanges []*net.IPNet,
+	excludedPathRegexps []*regexp.Regexp,
+) *GeoBlock {
 	return &GeoBlock{
 		next:                         next,
 		silentStartUp:                config.SilentStartUp,
@@ -200,9 +241,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		redirectURLIfDenied:          config.RedirectURLIfDenied,
 		excludedPathRegexps:          excludedPathRegexps,
 		name:                         name,
-		infoLogger:                   infoLogger,
+		infoLogger:                   logger,
 		ipDatabasePersistence:        ipDB, // may be nil => feature OFF
-	}, nil
+	}
 }
 
 func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
