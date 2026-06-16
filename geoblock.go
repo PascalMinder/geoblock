@@ -163,7 +163,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		SilentStartUp:   config.SilentStartUp,
 		Name:            name,
 	}
-	cache, ipDB, err := InitializeCache(ctx, cacheOptions)
+	// Share one cache + persistence worker per middleware (see GetOrInitCache).
+	cache, ipDB, err := GetOrInitCache(cacheOptions)
 	if err != nil {
 		infoLogger.Fatal(err)
 	}
