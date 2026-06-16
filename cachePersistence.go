@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -196,6 +197,39 @@ func (p *CachePersist) flushIfDirty() {
 
 	atomic.StoreUint32(&p.cacheDirty, 0)
 	p.lastFlush.Store(time.Now().UnixNano())
+}
+
+type sharedCacheEntry struct {
+	cache   *lru.LRUCache
+	persist *CachePersist
+}
+
+var (
+	sharedCachesMu sync.Mutex
+	sharedCaches   = map[string]*sharedCacheEntry{}
+)
+
+// GetOrInitCache shares one cache and persistence worker per middleware name,
+// created once on first use. Traefik builds the middleware several times (per
+// router and per config reload); sharing means an IP is looked up once, and a
+// single worker owns the persisted file instead of several racing to write it.
+// The worker uses a detached context to outlive any single instance (e.g. a
+// reload), which would otherwise leave the shared cache without a worker.
+func GetOrInitCache(opt Options) (*lru.LRUCache, *CachePersist, error) {
+	sharedCachesMu.Lock()
+	defer sharedCachesMu.Unlock()
+
+	if sc, ok := sharedCaches[opt.Name]; ok {
+		return sc.cache, sc.persist, nil
+	}
+
+	cache, persist, err := InitializeCache(context.Background(), opt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sharedCaches[opt.Name] = &sharedCacheEntry{cache: cache, persist: persist}
+	return cache, persist, nil
 }
 
 func InitializeCache(ctx context.Context, opt Options) (*lru.LRUCache, *CachePersist, error) {
