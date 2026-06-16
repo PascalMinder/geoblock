@@ -21,7 +21,7 @@ const (
 	xForwardedFor                      = "X-Forwarded-For"
 	xRealIP                            = "X-Real-IP"
 	countryHeader                      = "X-IPCountry"
-	numberOfHoursInMonth               = 30 * 24
+	defaultCacheTTLSeconds             = 30 * 24 * 60 * 60 // 30 days
 	unknownCountryCode                 = "AA"
 	countryCodeLength                  = 2
 	defaultDeniedRequestHTTPStatusCode = 403
@@ -42,6 +42,7 @@ type Config struct {
 	IPGeolocationHTTPHeaderField string   `yaml:"ipGeolocationHttpHeaderField"`
 	XForwardedForReverseProxy    bool     `yaml:"xForwardedForReverseProxy"`
 	CacheSize                    int      `yaml:"cacheSize"`
+	CacheTTLSeconds              int      `yaml:"cacheTtlSeconds"`
 	ForceMonthlyUpdate           bool     `yaml:"forceMonthlyUpdate"`
 	AllowUnknownCountries        bool     `yaml:"allowUnknownCountries"`
 	UnknownCountryAPIResponse    string   `yaml:"unknownCountryApiResponse"`
@@ -76,6 +77,7 @@ type GeoBlock struct {
 	logAPIRequests               bool
 	apiURI                       string
 	apiTimeoutMs                 int
+	cacheTTL                     time.Duration
 	ignoreAPITimeout             bool
 	ignoreAPIFailures            bool
 	iPGeolocationHTTPHeaderField string
@@ -118,6 +120,11 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	// set default API timeout if non is given
 	if config.APITimeoutMs == 0 {
 		config.APITimeoutMs = 750
+	}
+
+	// set default cache entry TTL (in seconds) if non is given
+	if config.CacheTTLSeconds == 0 {
+		config.CacheTTLSeconds = defaultCacheTTLSeconds
 	}
 
 	// set default HTTP status code for denied requests if non other is supplied
@@ -178,6 +185,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		logAPIRequests:               config.LogAPIRequests,
 		apiURI:                       config.API,
 		apiTimeoutMs:                 config.APITimeoutMs,
+		cacheTTL:                     time.Duration(config.CacheTTLSeconds) * time.Second,
 		ignoreAPITimeout:             config.IgnoreAPITimeout,
 		ignoreAPIFailures:            config.IgnoreAPIFailures,
 		iPGeolocationHTTPHeaderField: config.IPGeolocationHTTPHeaderField,
@@ -345,8 +353,8 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		a.infoLogger.Printf("%s: [%s] loaded from database: %s", a.name, requestIPAddr, entry)
 	}
 
-	// check if existing entry was made more than a month ago, if so update the entry
-	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
+	// check if existing entry is older than the configured cache TTL, if so update the entry
+	if time.Since(entry.Timestamp) >= a.cacheTTL && a.forceMonthlyUpdate {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
 			if a.ignoreAPIFailures {
@@ -419,8 +427,8 @@ func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bo
 		a.infoLogger.Printf("%s: [%s] Loaded from database: %s", a.name, ipAddressString, entry)
 	}
 
-	// check if existing entry was made more than a month ago, if so update the entry
-	if time.Since(entry.Timestamp).Hours() >= numberOfHoursInMonth && a.forceMonthlyUpdate {
+	// check if existing entry is older than the configured cache TTL, if so update the entry
+	if time.Since(entry.Timestamp) >= a.cacheTTL && a.forceMonthlyUpdate {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
 			return false, ""
@@ -725,6 +733,7 @@ func printConfiguration(name string, config *Config, logger *log.Logger) {
 	logger.Printf("%s: API timeout: %d", name, config.APITimeoutMs)
 	logger.Printf("%s: ignore API timeout: %t", name, config.IgnoreAPITimeout)
 	logger.Printf("%s: cache size: %d", name, config.CacheSize)
+	logger.Printf("%s: cache ttl seconds: %d", name, config.CacheTTLSeconds)
 	logger.Printf("%s: force monthly update: %t", name, config.ForceMonthlyUpdate)
 	logger.Printf("%s: allow unknown countries: %t", name, config.AllowUnknownCountries)
 	logger.Printf("%s: unknown country api response: %s", name, config.UnknownCountryAPIResponse)
