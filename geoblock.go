@@ -251,21 +251,6 @@ func (a *GeoBlock) isPathExcluded(path string) bool {
 }
 
 func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) bool {
-	// check if the request IP address is a local address and if those are allowed
-	if isPrivateIP(*requestIPAddr, a.privateIPRanges) {
-		if a.allowLocalRequests {
-			if a.logLocalRequests {
-				a.infoLogger.Printf("%s: request allowed [%s] since local IP addresses are allowed", a.name, requestIPAddr)
-			}
-			return true
-		}
-
-		if a.logLocalRequests {
-			a.infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
-		}
-		return false
-	}
-
 	// check if the request IP address is explicitly allowed
 	if ipInSlice(*requestIPAddr, a.allowedIPAddresses) {
 		if a.addCountryHeader {
@@ -294,6 +279,21 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 			}
 			return true
 		}
+	}
+
+	// check if the request IP address is a local address and if those are allowed
+	if isPrivateIP(*requestIPAddr, a.privateIPRanges) {
+		if a.allowLocalRequests {
+			if a.logLocalRequests {
+				a.infoLogger.Printf("%s: request allowed [%s] since local IP addresses are allowed", a.name, requestIPAddr)
+			}
+			return true
+		}
+
+		if a.logLocalRequests {
+			a.infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
+		}
+		return false
 	}
 
 	// check if the GeoIP database contains an entry for the request IP address
