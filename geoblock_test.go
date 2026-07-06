@@ -1336,6 +1336,53 @@ func TestLogDeniedDueToHeaderError_FirstCall(t *testing.T) {
 	}
 }
 
+func TestDeniedLocalRequestIsLogged(t *testing.T) {
+	// A denied local/private IP must log a reason even when logLocalRequests is
+	// off, otherwise the request is silently 403'd with nothing to trace (see #85).
+	tempDir, err := os.MkdirTemp("", "logtest")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.AllowLocalRequests = false
+	cfg.LogLocalRequests = false
+	cfg.LogFilePath = tempDir + "/info.log"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, privateRangeIP)
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusForbidden)
+
+	content, err := os.ReadFile(cfg.LogFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	expected := "request denied [" + privateRangeIP + "] since local IP addresses are denied"
+	if !strings.Contains(string(content), expected) {
+		t.Fatalf("expected denial reason %q in log, got:\n%s", expected, string(content))
+	}
+}
+
 func TestTimeoutOnApiResponse_DenyWhenIgnoreTimeoutFalse(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "logtest")
 	if err != nil {
