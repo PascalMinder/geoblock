@@ -250,6 +250,105 @@ func TestMultipleForwardedForIPwithSpaces(t *testing.T) {
 	}
 }
 
+func TestForwardedForIPWithPort(t *testing.T) {
+	// Some proxies (e.g. AWS with client port preservation) forward the client
+	// address as "ip:port". The port must be stripped before the lookup.
+	mockServer := createMockAPIServer(t, map[string][]byte{chExampleIP: []byte(`CH`)})
+	defer mockServer.Close()
+
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = mockServer.URL + "/{ip}"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Allowed request")) })
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, chExampleIP+":23200")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestForwardedForIPv6WithPort(t *testing.T) {
+	// Bracketed IPv6 with a port, e.g. "[2001:db8::1]:23200", must resolve to
+	// the bare IPv6 address for the lookup.
+	const ipv6 = "2001:db8::1"
+
+	mockServer := createMockAPIServer(t, map[string][]byte{ipv6: []byte(`CH`)})
+	defer mockServer.Close()
+
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = mockServer.URL + "/{ip}"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Allowed request")) })
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, "["+ipv6+"]:23200")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
+func TestReverseProxyForwardedForIPWithPort(t *testing.T) {
+	// Reverse-proxy mode uses only the first X-Forwarded-For IP; it too must
+	// tolerate a trailing port.
+	mockServer := createMockAPIServer(t, map[string][]byte{chExampleIP: []byte(`CH`)})
+	defer mockServer.Close()
+
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = mockServer.URL + "/{ip}"
+	cfg.XForwardedForReverseProxy = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Allowed request")) })
+
+	handler, err := geoblock.New(ctx, next, cfg, "GeoBlock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req.Header.Add(xForwardedFor, chExampleIP+":23200")
+
+	handler.ServeHTTP(recorder, req)
+
+	assertStatusCode(t, recorder.Result(), http.StatusOK)
+}
+
 func createMockAPIServer(t *testing.T, ipResponseMap map[string][]byte) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		t.Logf("Intercepted request: %s %s", req.Method, req.URL.String())

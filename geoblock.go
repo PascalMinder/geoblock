@@ -274,7 +274,7 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 					req.Header.Set(countryHeader, countryCode)
 				}
 			}
-			if a.logLocalRequests {
+			if a.logAllowedRequests {
 				a.infoLogger.Printf("%s: request allowed [%s] since the IP address is explicitly allowed", a.name, requestIPAddr)
 			}
 			return true
@@ -352,7 +352,10 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		}
 	}
 
-	// check if we are in black/white-list mode and allow/deny based on country code
+	// check if we are in black/white-list mode and allow/deny based on country code.
+	// Note: allowUnknownCountries only has an effect in whitelist mode. In blacklist
+	// mode an unknown country is, by definition, not on the blocklist, so
+	// isCountryAllowed is already true and the allowUnknownCountries term is redundant.
 	isUnknownCountry := entry.Country == unknownCountryCode
 	isCountryAllowed := stringInSlice(entry.Country, a.countries) != a.blackListMode
 	isAllowed := isCountryAllowed || (isUnknownCountry && a.allowUnknownCountries)
@@ -581,6 +584,13 @@ func ipInSlice(a net.IP, list []net.IP) bool {
 }
 
 func parseIP(addr string) (net.IP, error) {
+	// Strip an optional port, e.g. "10.10.10.10:23200" or "[2001:db8::1]:23200".
+	// net.SplitHostPort errors on a port-less address (both IPv4 and IPv6), in
+	// which case we keep the original string.
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+
 	ipAddress := net.ParseIP(addr)
 
 	if ipAddress == nil {
