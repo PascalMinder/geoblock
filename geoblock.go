@@ -220,6 +220,10 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if a.logAllowedRequests {
+		a.infoLogger.Printf("%s: evaluating client IP(s) [%s] for [%s]", a.name, formatIPList(requestIPAddresses), fullURL)
+	}
+
 	// Only keep the first IP address (should be the client, if the proxy behaves itself)
 	// so we can check whether it is allowed or denied.
 	if a.xForwardedForReverseProxy {
@@ -291,9 +295,10 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 			return true
 		}
 
-		if a.logLocalRequests {
-			a.infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
-		}
+		// Always surface local denials: this is the most common cause of an
+		// unexplained 403 (the evaluated IP is a proxy/private address), so the
+		// reason must be visible even when logLocalRequests is off.
+		a.infoLogger.Printf("%s: request denied [%s] since local IP addresses are denied", a.name, requestIPAddr)
 		return false
 	}
 
@@ -575,6 +580,14 @@ func stringInSlice(a string, list []string) bool {
 	}
 
 	return false
+}
+
+func formatIPList(ips []*net.IP) string {
+	parts := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		parts = append(parts, ip.String())
+	}
+	return strings.Join(parts, ", ")
 }
 
 func ipInSlice(a net.IP, list []net.IP) bool {
