@@ -21,7 +21,7 @@ const (
 	xForwardedFor                      = "X-Forwarded-For"
 	xRealIP                            = "X-Real-IP"
 	countryHeader                      = "X-IPCountry"
-	defaultCacheTTLSeconds             = 30 * 24 * 60 * 60 // 30 days
+	defaultCacheTTL                    = 30 * 24 * time.Hour // legacy forceMonthlyUpdate interval
 	unknownCountryCode                 = "AA"
 	countryCodeLength                  = 2
 	defaultDeniedRequestHTTPStatusCode = 403
@@ -120,11 +120,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	// set default API timeout if non is given
 	if config.APITimeoutMs == 0 {
 		config.APITimeoutMs = 750
-	}
-
-	// set default cache entry TTL (in seconds) if non is given
-	if config.CacheTTLSeconds == 0 {
-		config.CacheTTLSeconds = defaultCacheTTLSeconds
 	}
 
 	// set default HTTP status code for denied requests if non other is supplied
@@ -314,6 +309,24 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 	return allowed
 }
 
+// shouldRefreshEntry reports whether a cached entry has outlived its TTL and
+// must be re-fetched from the API.
+//
+// An explicit cacheTtlSeconds takes effect on its own. When it is unset (<= 0),
+// forceMonthlyUpdate preserves the legacy behavior of refreshing entries once
+// they are ~30 days old otherwise entries never expire by age.
+func (a *GeoBlock) shouldRefreshEntry(entry ipEntry) bool {
+	ttl := a.cacheTTL
+	if ttl <= 0 {
+		if !a.forceMonthlyUpdate {
+			return false
+		}
+		ttl = defaultCacheTTL
+	}
+
+	return time.Since(entry.Timestamp) >= ttl
+}
+
 func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bool, string) {
 	ipAddressString := requestIPAddr.String()
 	cacheEntry, cacheHit := a.database.Get(ipAddressString)
@@ -348,7 +361,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	}
 
 	// check if existing entry is older than the configured cache TTL, if so update the entry
-	if time.Since(entry.Timestamp) >= a.cacheTTL && a.forceMonthlyUpdate {
+	if a.shouldRefreshEntry(entry) {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
 			if a.ignoreAPIFailures {
@@ -419,7 +432,7 @@ func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bo
 	}
 
 	// check if existing entry is older than the configured cache TTL, if so update the entry
-	if time.Since(entry.Timestamp) >= a.cacheTTL && a.forceMonthlyUpdate {
+	if a.shouldRefreshEntry(entry) {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
 			return false, ""

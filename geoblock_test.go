@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1740,6 +1741,64 @@ func waitForFileNonEmpty(t *testing.T, path string, timeout time.Duration) {
 		t.Fatalf("persistence file %q was not created within %s: %v", path, timeout, err)
 	}
 	t.Fatalf("persistence file %q remained empty within %s (size=%d)", path, timeout, fi.Size())
+}
+
+func TestCacheTTLExpiresWithoutForceMonthlyUpdate(t *testing.T) {
+	// cacheTtlSeconds must drive cache refresh on its own, independent of the
+	// legacy forceMonthlyUpdate flag.
+	//
+	// Use a unique middleware name and a dedicated IP so the test is isolated
+	// from any process-wide cache shared by name: it must observe its own
+	// mock's call count, not a cache entry warmed by another test.
+	const ttlTestIP = "203.0.113.7" // TEST-NET-3, not used by other tests
+
+	var apiCalls int32
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&apiCalls, 1)
+		rw.WriteHeader(http.StatusOK)
+		_, _ = rw.Write([]byte("CH"))
+	}))
+	defer server.Close()
+
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.API = server.URL + "/{ip}"
+	cfg.CacheTTLSeconds = 1
+	cfg.ForceMonthlyUpdate = false
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doRequest := func() {
+		recorder := httptest.NewRecorder()
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+		if reqErr != nil {
+			t.Fatal(reqErr)
+		}
+		req.Header.Add(xForwardedFor, ttlTestIP)
+		handler.ServeHTTP(recorder, req)
+		assertStatusCode(t, recorder.Result(), http.StatusOK)
+	}
+
+	doRequest() // cache miss -> 1 API call
+	doRequest() // within TTL -> served from cache, no new call
+
+	if got := atomic.LoadInt32(&apiCalls); got != 1 {
+		t.Fatalf("expected 1 API call while entry is within TTL, got %d", got)
+	}
+
+	time.Sleep(1200 * time.Millisecond) // exceed the 1s TTL
+
+	doRequest() // entry older than TTL -> refresh -> 2nd API call
+
+	if got := atomic.LoadInt32(&apiCalls); got != 2 {
+		t.Fatalf("expected refresh after TTL expiry (2 API calls), got %d", got)
+	}
 }
 
 func createTesterConfig() *geoblock.Config {
