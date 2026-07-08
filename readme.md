@@ -68,6 +68,7 @@ http:
           api: "https://get.geojs.io/v1/ip/country/{ip}"
           apiTimeoutMs: 750 # optional
           cacheSize: 15
+          cacheTtlSeconds: 0 # optional, 0 falls back to forceMonthlyUpdate
           forceMonthlyUpdate: true
           allowUnknownCountries: false
           unknownCountryApiResponse: "nil"
@@ -489,9 +490,18 @@ Allow setting the name of a custom HTTP header field to retrieve the country cod
 
 Defines the max size of the [LRU](<https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)>) (least recently used) cache.
 
+### Cache TTL `cacheTtlSeconds`
+
+Time-to-live, in seconds, for a cached IP to country lookup. Once an entry is older than this, the next request for that IP re-fetches the country from the API instead of serving the cached value.
+
+- **> 0**: entries expire after the given number of seconds (e.g. `86400` for one day). This takes effect on its own, regardless of [`forceMonthlyUpdate`](#force-monthly-update-forcemonthlyupdate).
+- **`0` / unset (default)**: falls back to [`forceMonthlyUpdate`](#force-monthly-update-forcemonthlyupdate): if that is `true`, entries expire after ~30 days; if it is `false`, cached entries never expire by age.
+
+Note: entries can still be evicted earlier when the cache is full, per [`cacheSize`](#cache-size-cachesize).
+
 ### Force monthly update `forceMonthlyUpdate`
 
-Even if an IP stays in the cache for a period of a month (about 30 x 24 hours), it must be fetch again after a month.
+Refetch a cached IP after about a month (30 × 24 hours) instead of trusting the cached country indefinitely. This is the legacy expiry switch; if [`cacheTtlSeconds`](#cache-ttl-cachettlseconds) is set (> 0), that value takes precedence and this flag is ignored.
 
 ### Allow unknown countries `allowUnknownCountries`
 

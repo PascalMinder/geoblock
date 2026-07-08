@@ -14,6 +14,7 @@ testData:
   api: "https://get.geojs.io/v1/ip/country/{ip}"
   apiTimeoutMs: 150
   cacheSize: 15
+  cacheTtlSeconds: 0
   forceMonthlyUpdate: true
   allowUnknownCountries: false
   unknownCountryApiResponse: "nil"
