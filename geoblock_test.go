@@ -2065,6 +2065,81 @@ func TestTimeoutOnCacheRefresh_AllowWhenIgnoreTimeoutTrue(t *testing.T) {
 	assertStatusCode(t, rec.Result(), http.StatusOK)
 }
 
+func TestTooManyForwardedIPsDenied(t *testing.T) {
+	// Raise an error in the API, since the request must be rejected before any
+	// IP to country lookup is done.
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("API was called for a request exceeding the IP count limit")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 11 X-Forwarded-For entries
+	elevenIPs := make([]string, 11)
+	for i := range elevenIPs {
+		elevenIPs[i] = fmt.Sprintf("10.1.1.%d", i+1)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, strings.Join(elevenIPs, ", "))
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+
+	// X-Real-IP entries count toward the same limit
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, strings.Join(elevenIPs[:10], ", "))
+	req.Header.Add("X-Real-IP", "10.2.2.1")
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+}
+
+func TestForwardedIPCountAtLimitAllowed(t *testing.T) {
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly 10 entries (the limit) must still be evaluated and allowed.
+	tenIPs := make([]string, 10)
+	for i := range tenIPs {
+		tenIPs[i] = chExampleIP
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, strings.Join(tenIPs, ", "))
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusOK)
+}
+
 func createTesterConfig() *geoblock.Config {
 	cfg := geoblock.CreateConfig()
 

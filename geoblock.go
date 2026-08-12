@@ -26,6 +26,9 @@ const (
 	countryCodeLength                  = 2
 	defaultDeniedRequestHTTPStatusCode = 403
 	defaultCacheWriteCycle             = 15
+	// maxRequestIPCount caps how many IPs from X-Forwarded-For and X-Real-IP
+	// are evaluated per request.
+	maxRequestIPCount = 10
 )
 
 // Config the plugin configuration.
@@ -513,6 +516,11 @@ func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 
 	xRealIPValue := req.Header.Get(xRealIP)
 	xRealIPList := strings.FieldsFunc(xRealIPValue, splitFn)
+
+	// Deny connection if the number of IP entries is larger than the allowed.
+	if ipCount := len(xForwardedForIPs) + len(xRealIPList); ipCount > maxRequestIPCount {
+		return nil, fmt.Errorf("too many IP addresses in request headers (%d, limit %d)", ipCount, maxRequestIPCount)
+	}
 
 	for _, value := range xForwardedForIPs {
 		value = strings.Trim(value, " ")
