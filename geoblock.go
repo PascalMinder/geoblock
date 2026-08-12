@@ -786,6 +786,8 @@ func printConfiguration(name string, config *Config, logger *log.Logger) {
 	logger.Printf("%s: API uri: %s", name, config.API)
 	logger.Printf("%s: API timeout: %d", name, config.APITimeoutMs)
 	logger.Printf("%s: ignore API timeout: %t", name, config.IgnoreAPITimeout)
+	logger.Printf("%s: ignore API failures: %t", name, config.IgnoreAPIFailures)
+	logger.Printf("%s: X-Forwarded-For reverse proxy: %t", name, config.XForwardedForReverseProxy)
 	logger.Printf("%s: cache size: %d", name, config.CacheSize)
 	logger.Printf("%s: cache ttl seconds: %d", name, config.CacheTTLSeconds)
 	logger.Printf("%s: force monthly update: %t", name, config.ForceMonthlyUpdate)
@@ -794,8 +796,10 @@ func printConfiguration(name string, config *Config, logger *log.Logger) {
 	logger.Printf("%s: blacklist mode: %t", name, config.BlackListMode)
 	logger.Printf("%s: add country header: %t", name, config.AddCountryHeader)
 	logger.Printf("%s: countries: %v", name, config.Countries)
+	logger.Printf("%s: allowed IP addresses: %v", name, config.AllowedIPAddresses)
 	logger.Printf("%s: Denied request status code: %d", name, config.HTTPStatusCodeDeniedRequest)
 	logger.Printf("%s: Log file path: %s", name, config.LogFilePath)
+	logger.Printf("%s: IP database cache path: %s", name, config.IPDatabaseCachePath)
 	if len(config.RedirectURLIfDenied) != 0 {
 		logger.Printf("%s: Redirect URL on denied requests: %s", name, config.RedirectURLIfDenied)
 	}
