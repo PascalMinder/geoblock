@@ -482,6 +482,8 @@ If the `ignoreAPITimeout` option is set to `true`, a request is allowed even if 
 
 If the `ignoreAPIFailures` option is set to `true`, a request is allowed even if the API returns a non-200 status code or an error occurs during the API request.
 
+Note: failed lookups are remembered for 30 seconds. Within that window further requests from the same IP are allowed or denied according to the `ignoreAPIFailures`/`ignoreAPITimeout` policy directly from the cache, without waiting on the API again. After the window the API is retried. This keeps an API outage from adding up to `apiTimeoutMs` of latency to every request.
+
 ### Set custom HTTP header field to retrieve the country code from `ipGeolocationHttpHeaderField`
 
 Allow setting the name of a custom HTTP header field to retrieve the country code from. E.g. `cf-ipcountry` for Cloudflare.
@@ -545,6 +547,8 @@ Allows to define a target for the logs of the middleware. The path must look lik
 ### Use only the first `X-Forwarded-For` IP address `xForwardedForReverseProxy`
 
 Basically tells GeoBlock to only allow/deny a request based on the first IP address in the X-ForwardedFor HTTP header. This is useful for servers behind e.g. a Cloudflare proxy.
+
+Note: requests carrying more than 10 IP addresses in total across the `X-Forwarded-For` and `X-Real-IP` headers are denied outright. Every collected address is looked up sequentially, so this limit prevents a single request with a fabricated many-hop header chain from stalling the middleware. Legitimate proxy chains should be far shorter.
 
 ### Redirect denied requests `redirectUrlIfDenied`
 

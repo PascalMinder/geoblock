@@ -4,6 +4,7 @@ package geoblock
 import (
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +27,28 @@ const (
 	countryCodeLength                  = 2
 	defaultDeniedRequestHTTPStatusCode = 403
 	defaultCacheWriteCycle             = 15
+	// maxRequestIPCount caps how many IPs from X-Forwarded-For and X-Real-IP
+	// are evaluated per request.
+	maxRequestIPCount = 10
+	// failureCacheTTL is how long a failed lookup is remembered. Within this
+	// window requests from the same IP replay the configured allow/deny policy.
+	failureCacheTTL = 30 * time.Second
+	// maxAPIResponseBytes bounds how much of an API response is read. A valid
+	// response is a two-letter country code (or a short unknown sentinel), so
+	// anything larger is invalid and must not be buffered.
+	maxAPIResponseBytes = 64
+	// apiMaxIdleConnsPerHost sizes the keep-alive connection pool towards the
+	// geolocation API. This allows to avoid a fresh TLS handshake for most
+	// calls.
+	apiMaxIdleConnsPerHost = 16
+)
+
+// Kinds of lookup failure recorded in negatively cached entries. The timeout
+// kind is kept separate because ignoreApiTimeout applies only to timeouts.
+const (
+	failureNone = iota
+	failureGeneric
+	failureTimeout
 )
 
 // Config the plugin configuration.
@@ -60,6 +83,19 @@ type Config struct {
 type ipEntry struct {
 	Country   string
 	Timestamp time.Time
+	// Failure marks a negatively cached lookup. Zero means a successful lookup.
+	Failure int
+}
+
+func (e ipEntry) String() string {
+	switch e.Failure {
+	case failureTimeout:
+		return fmt.Sprintf("{lookup timeout %s}", e.Timestamp)
+	case failureGeneric:
+		return fmt.Sprintf("{lookup failure %s}", e.Timestamp)
+	default:
+		return fmt.Sprintf("{%s %s}", e.Country, e.Timestamp)
+	}
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -76,7 +112,7 @@ type GeoBlock struct {
 	logAllowedRequests           bool
 	logAPIRequests               bool
 	apiURI                       string
-	apiTimeoutMs                 int
+	apiClient                    *http.Client
 	cacheTTL                     time.Duration
 	ignoreAPITimeout             bool
 	ignoreAPIFailures            bool
@@ -223,7 +259,7 @@ func buildGeoBlock(
 		logAllowedRequests:           config.LogAllowedRequests,
 		logAPIRequests:               config.LogAPIRequests,
 		apiURI:                       config.API,
-		apiTimeoutMs:                 config.APITimeoutMs,
+		apiClient:                    newAPIClient(config.APITimeoutMs),
 		cacheTTL:                     time.Duration(config.CacheTTLSeconds) * time.Second,
 		ignoreAPITimeout:             config.IgnoreAPITimeout,
 		ignoreAPIFailures:            config.IgnoreAPIFailures,
@@ -367,10 +403,16 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 // shouldRefreshEntry reports whether a cached entry has outlived its TTL and
 // must be re-fetched from the API.
 //
-// An explicit cacheTtlSeconds takes effect on its own. When it is unset (<= 0),
+// Negatively cached failures always expire after failureCacheTTL so the API is
+// retried soon after an outage. For successful lookups an explicit
+// cacheTtlSeconds takes effect on its own. When it is unset (<= 0),
 // forceMonthlyUpdate preserves the legacy behavior of refreshing entries once
 // they are ~30 days old otherwise entries never expire by age.
 func (a *GeoBlock) shouldRefreshEntry(entry ipEntry) bool {
+	if entry.Failure != failureNone {
+		return time.Since(entry.Timestamp) >= failureCacheTTL
+	}
+
 	ttl := a.cacheTTL
 	if ttl <= 0 {
 		if !a.forceMonthlyUpdate {
@@ -409,6 +451,12 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		if err != nil {
 			return a.handleLookupError(err, requestIPAddr), ""
 		}
+	}
+
+	// a cached failure that has not expired yet. Replay the
+	// allow/deny policy without a new API round trip.
+	if entry.Failure != failureNone {
+		return a.handleCachedLookupFailure(entry, requestIPAddr), ""
 	}
 
 	// check if we are in black/white-list mode and allow/deny based on country code.
@@ -451,7 +499,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	return true, entry.Country
 }
 
-// handleLookupError applies the configured fail-open policy to a failed
+// handleLookupError applies the configured allow/deny policy to a failed
 // country lookup: any API failure allows the request when ignoreApiFailures is
 // set, a timeout allows it when ignoreApiTimeout is set, anything else denies.
 func (a *GeoBlock) handleLookupError(err error, requestIPAddr *net.IP) bool {
@@ -466,6 +514,24 @@ func (a *GeoBlock) handleLookupError(err error, requestIPAddr *net.IP) bool {
 	}
 
 	a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
+	return false
+}
+
+// handleCachedLookupFailure applies the same allow/deny policy as
+// handleLookupError, but from a negatively cached entry instead of a live
+// error, so no time is spent waiting on the API.
+func (a *GeoBlock) handleCachedLookupFailure(entry ipEntry, requestIPAddr *net.IP) bool {
+	if a.ignoreAPIFailures {
+		a.infoLogger.Printf("%s: request allowed [%s] due to cached API failure", a.name, requestIPAddr)
+		return true
+	}
+
+	if entry.Failure == failureTimeout && a.ignoreAPITimeout {
+		a.infoLogger.Printf("%s: request allowed [%s] due to cached API timeout", a.name, requestIPAddr)
+		return true
+	}
+
+	a.infoLogger.Printf("%s: request denied [%s] due to cached API failure", a.name, requestIPAddr)
 	return false
 }
 
@@ -498,6 +564,11 @@ func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bo
 		}
 	}
 
+	// a negatively cached failure carries no country to report
+	if entry.Failure != failureNone {
+		return false, ""
+	}
+
 	return true, entry.Country
 }
 
@@ -513,6 +584,11 @@ func (a *GeoBlock) collectRemoteIP(req *http.Request) ([]*net.IP, error) {
 
 	xRealIPValue := req.Header.Get(xRealIP)
 	xRealIPList := strings.FieldsFunc(xRealIPValue, splitFn)
+
+	// Deny connection if the number of IP entries is larger than the allowed.
+	if ipCount := len(xForwardedForIPs) + len(xRealIPList); ipCount > maxRequestIPCount {
+		return nil, fmt.Errorf("too many IP addresses in request headers (%d, limit %d)", ipCount, maxRequestIPCount)
+	}
 
 	for _, value := range xForwardedForIPs {
 		value = strings.Trim(value, " ")
@@ -542,6 +618,22 @@ func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (
 
 	country, err := a.getCountryCode(req, ipAddressString)
 	if err != nil {
+		// If the request was canceled, do not cache the result, since it does
+		// not say anything about the health of the API.
+		if errors.Is(err, context.Canceled) {
+			return entry, err
+		}
+
+		// Negatively cache the failure so requests within failureCacheTTL
+		// replay the allow/deny policy without another API round trip.
+		failure := failureGeneric
+		if os.IsTimeout(err) {
+			failure = failureTimeout
+		}
+		entry = ipEntry{Failure: failure, Timestamp: time.Now()}
+		a.database.Add(ipAddressString, entry)
+		a.ipDatabasePersistence.MarkDirty()
+
 		return entry, err
 	}
 
@@ -570,7 +662,7 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 		)
 	}
 
-	country, err := a.callGeoJS(ipAddressString)
+	country, err := a.callGeoJS(req.Context(), ipAddressString)
 	if err != nil {
 		if !os.IsTimeout(err) && !a.ignoreAPITimeout {
 			a.infoLogger.Printf("%s: %s", a.name, err)
@@ -581,34 +673,48 @@ func (a *GeoBlock) getCountryCode(req *http.Request, ipAddressString string) (st
 	return country, nil
 }
 
-func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
-	geoJsClient := http.Client{
-		Timeout: time.Millisecond * time.Duration(a.apiTimeoutMs),
-	}
+// newAPIClient builds the shared HTTP client for country lookups. All calls go
+// to the single configured API host, so the transport keeps a larger idle
+// connection pool than the default to avoid TLS handshakes on bursts.
+func newAPIClient(timeoutMs int) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConnsPerHost = apiMaxIdleConnsPerHost
 
+	return &http.Client{
+		Timeout:   time.Millisecond * time.Duration(timeoutMs),
+		Transport: transport,
+	}
+}
+
+func (a *GeoBlock) callGeoJS(ctx context.Context, ipAddress string) (string, error) {
 	apiURI := strings.Replace(a.apiURI, "{ip}", ipAddress, 1)
 	if a.logAPIRequests {
 		a.infoLogger.Printf("%s: Sending request to %s", a.name, apiURI)
 	}
-	req, err := http.NewRequest(http.MethodGet, apiURI, nil)
+	// The lookup runs on behalf of the incoming request: when its client goes
+	// away, the context cancels the API call instead of letting it run on.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURI, nil)
 	if err != nil {
 		return "", err
 	}
 
-	res, err := geoJsClient.Do(req)
+	res, err := a.apiClient.Do(req)
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		// Drain (bounded) so the keep-alive connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, maxAPIResponseBytes))
+		_ = res.Body.Close()
+	}()
 
 	if res.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API response status code: %d", res.StatusCode)
 	}
 
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	body, err := io.ReadAll(res.Body)
+	// Never buffer more than a plausible response. An oversized body fails the
+	// length check below instead of exhausting memory.
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxAPIResponseBytes))
 	if err != nil {
 		return "", err
 	}
@@ -617,12 +723,11 @@ func (a *GeoBlock) callGeoJS(ipAddress string) (string, error) {
 	countryCode := strings.TrimSuffix(sb, "\n")
 
 	// api response for unknown country
-	if len([]rune(countryCode)) == len(a.unknownCountryCode) && countryCode == a.unknownCountryCode {
+	if countryCode == a.unknownCountryCode {
 		return unknownCountryCode, nil
 	}
 
-	// this could possible cause a DoS attack
-	if len([]rune(countryCode)) != countryCodeLength {
+	if len(countryCode) != countryCodeLength {
 		return "", fmt.Errorf("API response has more or less than 2 characters")
 	}
 
