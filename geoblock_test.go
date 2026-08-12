@@ -2249,6 +2249,80 @@ func TestApiTimeoutNegativelyCached_AllowedWhenIgnoreTimeoutTrue(t *testing.T) {
 	}
 }
 
+func TestOversizedApiResponseDenied(t *testing.T) {
+	// A response far larger than any valid country code must be rejected
+	// without being buffered whole.
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("X"), 1<<20))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+}
+
+func TestCanceledRequestNotNegativelyCached(t *testing.T) {
+	var apiCalls atomic.Int32
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		apiCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A request whose client already went away. The lookup is aborted and the
+	// request denied, but the abort must not be cached as an API failure.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil).WithContext(canceledCtx)
+	req.Header.Add(xForwardedFor, chExampleIP)
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+
+	// The next request from the same IP must reach the API and succeed
+	// instead of replaying a bogus negative cache entry.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusOK)
+
+	if calls := apiCalls.Load(); calls != 1 {
+		t.Errorf("expected exactly 1 API call, got %d", calls)
+	}
+}
+
 func createTesterConfig() *geoblock.Config {
 	cfg := geoblock.CreateConfig()
 
