@@ -29,6 +29,17 @@ const (
 	// maxRequestIPCount caps how many IPs from X-Forwarded-For and X-Real-IP
 	// are evaluated per request.
 	maxRequestIPCount = 10
+	// failureCacheTTL is how long a failed lookup is remembered. Within this
+	// window requests from the same IP replay the configured allow/deny policy.
+	failureCacheTTL = 30 * time.Second
+)
+
+// Kinds of lookup failure recorded in negatively cached entries. The timeout
+// kind is kept separate because ignoreApiTimeout applies only to timeouts.
+const (
+	failureNone = iota
+	failureGeneric
+	failureTimeout
 )
 
 // Config the plugin configuration.
@@ -63,6 +74,19 @@ type Config struct {
 type ipEntry struct {
 	Country   string
 	Timestamp time.Time
+	// Failure marks a negatively cached lookup. Zero means a successful lookup.
+	Failure int
+}
+
+func (e ipEntry) String() string {
+	switch e.Failure {
+	case failureTimeout:
+		return fmt.Sprintf("{lookup timeout %s}", e.Timestamp)
+	case failureGeneric:
+		return fmt.Sprintf("{lookup failure %s}", e.Timestamp)
+	default:
+		return fmt.Sprintf("{%s %s}", e.Country, e.Timestamp)
+	}
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -370,10 +394,16 @@ func (a *GeoBlock) allowDenyIPAddress(requestIPAddr *net.IP, req *http.Request) 
 // shouldRefreshEntry reports whether a cached entry has outlived its TTL and
 // must be re-fetched from the API.
 //
-// An explicit cacheTtlSeconds takes effect on its own. When it is unset (<= 0),
+// Negatively cached failures always expire after failureCacheTTL so the API is
+// retried soon after an outage. For successful lookups an explicit
+// cacheTtlSeconds takes effect on its own. When it is unset (<= 0),
 // forceMonthlyUpdate preserves the legacy behavior of refreshing entries once
 // they are ~30 days old otherwise entries never expire by age.
 func (a *GeoBlock) shouldRefreshEntry(entry ipEntry) bool {
+	if entry.Failure != failureNone {
+		return time.Since(entry.Timestamp) >= failureCacheTTL
+	}
+
 	ttl := a.cacheTTL
 	if ttl <= 0 {
 		if !a.forceMonthlyUpdate {
@@ -412,6 +442,12 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 		if err != nil {
 			return a.handleLookupError(err, requestIPAddr), ""
 		}
+	}
+
+	// a cached failure that has not expired yet. Replay the
+	// allow/deny policy without a new API round trip.
+	if entry.Failure != failureNone {
+		return a.handleCachedLookupFailure(entry, requestIPAddr), ""
 	}
 
 	// check if we are in black/white-list mode and allow/deny based on country code.
@@ -454,7 +490,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	return true, entry.Country
 }
 
-// handleLookupError applies the configured fail-open policy to a failed
+// handleLookupError applies the configured allow/deny policy to a failed
 // country lookup: any API failure allows the request when ignoreApiFailures is
 // set, a timeout allows it when ignoreApiTimeout is set, anything else denies.
 func (a *GeoBlock) handleLookupError(err error, requestIPAddr *net.IP) bool {
@@ -469,6 +505,24 @@ func (a *GeoBlock) handleLookupError(err error, requestIPAddr *net.IP) bool {
 	}
 
 	a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
+	return false
+}
+
+// handleCachedLookupFailure applies the same allow/deny policy as
+// handleLookupError, but from a negatively cached entry instead of a live
+// error, so no time is spent waiting on the API.
+func (a *GeoBlock) handleCachedLookupFailure(entry ipEntry, requestIPAddr *net.IP) bool {
+	if a.ignoreAPIFailures {
+		a.infoLogger.Printf("%s: request allowed [%s] due to cached API failure", a.name, requestIPAddr)
+		return true
+	}
+
+	if entry.Failure == failureTimeout && a.ignoreAPITimeout {
+		a.infoLogger.Printf("%s: request allowed [%s] due to cached API timeout", a.name, requestIPAddr)
+		return true
+	}
+
+	a.infoLogger.Printf("%s: request denied [%s] due to cached API failure", a.name, requestIPAddr)
 	return false
 }
 
@@ -499,6 +553,11 @@ func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bo
 		if err != nil {
 			return false, ""
 		}
+	}
+
+	// a negatively cached failure carries no country to report
+	if entry.Failure != failureNone {
+		return false, ""
 	}
 
 	return true, entry.Country
@@ -550,6 +609,16 @@ func (a *GeoBlock) createNewIPEntry(req *http.Request, ipAddressString string) (
 
 	country, err := a.getCountryCode(req, ipAddressString)
 	if err != nil {
+		// Negatively cache the failure so requests within failureCacheTTL
+		// replay the allow/deny policy without another API round trip.
+		failure := failureGeneric
+		if os.IsTimeout(err) {
+			failure = failureTimeout
+		}
+		entry = ipEntry{Failure: failure, Timestamp: time.Now()}
+		a.database.Add(ipAddressString, entry)
+		a.ipDatabasePersistence.MarkDirty()
+
 		return entry, err
 	}
 

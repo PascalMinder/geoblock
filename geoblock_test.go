@@ -2140,6 +2140,115 @@ func TestForwardedIPCountAtLimitAllowed(t *testing.T) {
 	assertStatusCode(t, rec.Result(), http.StatusOK)
 }
 
+func TestApiFailureNegativelyCached_Denied(t *testing.T) {
+	var apiCalls atomic.Int32
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		apiCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	// fail-closed defaults: lookup failures deny
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both requests are denied, but only the first one may hit the API. The
+	// second must be answered from the negative cache.
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+		req.Header.Add(xForwardedFor, chExampleIP)
+		handler.ServeHTTP(rec, req)
+		assertStatusCode(t, rec.Result(), http.StatusForbidden)
+	}
+
+	if calls := apiCalls.Load(); calls != 1 {
+		t.Errorf("expected exactly 1 API call, got %d", calls)
+	}
+}
+
+func TestApiFailureNegativelyCached_AllowedWhenIgnoreFailuresTrue(t *testing.T) {
+	var apiCalls atomic.Int32
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		apiCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.IgnoreAPIFailures = true // API failures should ALLOW
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+		req.Header.Add(xForwardedFor, chExampleIP)
+		handler.ServeHTTP(rec, req)
+		assertStatusCode(t, rec.Result(), http.StatusOK)
+	}
+
+	if calls := apiCalls.Load(); calls != 1 {
+		t.Errorf("expected exactly 1 API call, got %d", calls)
+	}
+}
+
+func TestApiTimeoutNegativelyCached_AllowedWhenIgnoreTimeoutTrue(t *testing.T) {
+	var apiCalls atomic.Int32
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		apiCalls.Add(1)
+		time.Sleep(50 * time.Millisecond) // > APITimeoutMs below
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.APITimeoutMs = 5        // 5ms client timeout
+	cfg.IgnoreAPITimeout = true // timeouts should ALLOW
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The first request waits out the client timeout. The second one must be
+	// allowed from the negative cache without contacting the API again.
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+		req.Header.Add(xForwardedFor, chExampleIP)
+		handler.ServeHTTP(rec, req)
+		assertStatusCode(t, rec.Result(), http.StatusOK)
+	}
+
+	if calls := apiCalls.Load(); calls != 1 {
+		t.Errorf("expected exactly 1 API call, got %d", calls)
+	}
+}
+
 func createTesterConfig() *geoblock.Config {
 	cfg := geoblock.CreateConfig()
 
