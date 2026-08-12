@@ -546,6 +546,8 @@ Allows to define a target for the logs of the middleware. The path must look lik
 
 Basically tells GeoBlock to only allow/deny a request based on the first IP address in the X-ForwardedFor HTTP header. This is useful for servers behind e.g. a Cloudflare proxy.
 
+Note: requests carrying more than 10 IP addresses in total across the `X-Forwarded-For` and `X-Real-IP` headers are denied outright. Every collected address is looked up sequentially, so this limit prevents a single request with a fabricated many-hop header chain from stalling the middleware. Legitimate proxy chains should be far shorter.
+
 ### Redirect denied requests `redirectUrlIfDenied`
 
 Allows redirecting denied requests with a HTTP 302 (Found) status code to the configured URL. So instead of "blocking" the client, the client will be redirected to the configured URL.
