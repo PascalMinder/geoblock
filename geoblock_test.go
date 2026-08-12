@@ -1981,6 +1981,90 @@ func TestCacheTTLExpiresWithoutForceMonthlyUpdate(t *testing.T) {
 	}
 }
 
+func TestInvalidAllowedIPAddressEntry(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.AllowedIPAddresses = append(cfg.AllowedIPAddresses, "not-an-ip")
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	_, err := geoblock.New(ctx, next, cfg, t.Name())
+
+	// expect error
+	if err == nil {
+		t.Fatal("invalid allowedIPAddresses entry accepted")
+	}
+}
+
+func TestReverseProxyModeWithoutForwardedHeaders(t *testing.T) {
+	cfg := createTesterConfig()
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.XForwardedForReverseProxy = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	// Neither X-Forwarded-For nor X-Real-IP is set.
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assertStatusCode(t, rec.Result(), http.StatusForbidden)
+}
+
+func TestTimeoutOnCacheRefresh_AllowWhenIgnoreTimeoutTrue(t *testing.T) {
+	// Stub server that answers quickly at first (to prime the cache) and can be
+	// switched to respond slower than the client timeout for the refresh.
+	var timeoutMode atomic.Bool
+	apiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if timeoutMode.Load() {
+			time.Sleep(50 * time.Millisecond) // > APITimeoutMs below
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("CH"))
+	}))
+	defer apiStub.Close()
+
+	cfg := createTesterConfig()
+	cfg.API = apiStub.URL + "/{ip}"
+	cfg.Countries = append(cfg.Countries, "CH")
+	cfg.APITimeoutMs = 5        // 5ms client timeout
+	cfg.IgnoreAPITimeout = true // timeouts should ALLOW, also on cache refresh
+	cfg.CacheTTLSeconds = 1
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := geoblock.New(ctx, next, cfg, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Prime the cache from the fast stub.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusOK)
+
+	// Let the entry outlive its TTL, then time out on the refresh lookup.
+	timeoutMode.Store(true)
+	time.Sleep(1100 * time.Millisecond)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "http://localhost", nil)
+	req.Header.Add(xForwardedFor, chExampleIP)
+	handler.ServeHTTP(rec, req)
+	assertStatusCode(t, rec.Result(), http.StatusOK)
+}
+
 func createTesterConfig() *geoblock.Config {
 	cfg := geoblock.CreateConfig()
 

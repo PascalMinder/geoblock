@@ -114,7 +114,10 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, err
 	}
 
-	allowedIPAddresses, allowedIPRanges := parseAllowedIPAddresses(config.AllowedIPAddresses, infoLogger)
+	allowedIPAddresses, allowedIPRanges, err := parseAllowedIPAddresses(config.AllowedIPAddresses)
+	if err != nil {
+		return nil, err
+	}
 
 	excludedPathRegexps, err := compileExcludedPathPatterns(config.ExcludedPathPatterns)
 	if err != nil {
@@ -271,6 +274,11 @@ func (a *GeoBlock) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// Only keep the first IP address (should be the client, if the proxy behaves itself)
 	// so we can check whether it is allowed or denied.
 	if a.xForwardedForReverseProxy {
+		if len(requestIPAddresses) == 0 {
+			a.infoLogger.Printf("%s: no client IP found in request headers", a.name)
+			rw.WriteHeader(http.StatusForbidden)
+			return
+		}
 		requestIPAddresses = requestIPAddresses[:1]
 	}
 
@@ -383,19 +391,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	if !cacheHit {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
-			if a.ignoreAPIFailures {
-				a.infoLogger.Printf("%s: request allowed [%s] due to API failure", a.name, requestIPAddr)
-				return true, ""
-			}
-
-			if os.IsTimeout(err) && a.ignoreAPITimeout {
-				a.infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
-				// TODO: this was previously an immediate response to the client
-				return true, ""
-			}
-
-			a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
-			return false, ""
+			return a.handleLookupError(err, requestIPAddr), ""
 		}
 	} else {
 		entry = cacheEntry.(ipEntry)
@@ -411,12 +407,7 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	if a.shouldRefreshEntry(entry) {
 		entry, err = a.createNewIPEntry(req, ipAddressString)
 		if err != nil {
-			if a.ignoreAPIFailures {
-				a.infoLogger.Printf("%s: request allowed [%s] due to API failure", a.name, requestIPAddr)
-				return true, ""
-			}
-			a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
-			return false, ""
+			return a.handleLookupError(err, requestIPAddr), ""
 		}
 	}
 
@@ -458,6 +449,24 @@ func (a *GeoBlock) allowDenyCachedRequestIP(requestIPAddr *net.IP, req *http.Req
 	}
 
 	return true, entry.Country
+}
+
+// handleLookupError applies the configured fail-open policy to a failed
+// country lookup: any API failure allows the request when ignoreApiFailures is
+// set, a timeout allows it when ignoreApiTimeout is set, anything else denies.
+func (a *GeoBlock) handleLookupError(err error, requestIPAddr *net.IP) bool {
+	if a.ignoreAPIFailures {
+		a.infoLogger.Printf("%s: request allowed [%s] due to API failure", a.name, requestIPAddr)
+		return true
+	}
+
+	if os.IsTimeout(err) && a.ignoreAPITimeout {
+		a.infoLogger.Printf("%s: request allowed [%s] due to API timeout", a.name, requestIPAddr)
+		return true
+	}
+
+	a.infoLogger.Printf("%s: request denied [%s] due to error: %s", a.name, requestIPAddr, err)
+	return false
 }
 
 func (a *GeoBlock) cachedRequestIP(requestIPAddr *net.IP, req *http.Request) (bool, string) {
@@ -729,7 +738,7 @@ func getHTTPStatusCodeDeniedRequest(code int) (int, error) {
 	return defaultDeniedRequestHTTPStatusCode, nil
 }
 
-func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []*net.IPNet) {
+func parseAllowedIPAddresses(entries []string) ([]net.IP, []*net.IPNet, error) {
 	var allowedIPAddresses []net.IP
 	var allowedIPRanges []*net.IPNet
 
@@ -746,12 +755,12 @@ func parseAllowedIPAddresses(entries []string, logger *log.Logger) ([]net.IP, []
 		// Attempt to parse as a single IP address
 		ipAddress := net.ParseIP(ipAddressEntry)
 		if ipAddress == nil {
-			logger.Fatal("Invalid IP address provided:", ipAddressEntry)
+			return nil, nil, fmt.Errorf("invalid allowed IP address or CIDR range [%s]", ipAddressEntry)
 		}
 		allowedIPAddresses = append(allowedIPAddresses, ipAddress)
 	}
 
-	return allowedIPAddresses, allowedIPRanges
+	return allowedIPAddresses, allowedIPRanges, nil
 }
 
 func compileExcludedPathPatterns(patterns []string) ([]*regexp.Regexp, error) {
